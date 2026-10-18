@@ -55,6 +55,16 @@ class Line:
 
 
 @dataclass(frozen=True)
+class Trip:
+    """A car trip planned to arrive on time."""
+
+    departure: datetime
+    travel_seconds: int
+    traffic_delay_seconds: int
+    length_meters: int
+
+
+@dataclass(frozen=True)
 class Place:
     """An address found by search."""
 
@@ -81,13 +91,13 @@ class CarProvider(ABC):
     """Works out when to leave by car to arrive on time."""
 
     @abstractmethod
-    async def departure_for_arrival(
+    async def trip_for_arrival(
         self,
         origin: tuple[float, float],
         destination: tuple[float, float],
         arrive_at: datetime,
-    ) -> datetime:
-        """The time to leave `origin` to reach `destination` by `arrive_at`."""
+    ) -> Trip:
+        """The trip from `origin` that reaches `destination` by `arrive_at`."""
 
     @abstractmethod
     async def search_places(self, query: str) -> list[Place]:

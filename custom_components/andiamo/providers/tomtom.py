@@ -10,7 +10,7 @@ import aiohttp
 
 from homeassistant.util import dt as dt_util
 
-from .base import CarProvider, Place, ProviderError
+from .base import CarProvider, Place, ProviderError, Trip
 
 ROUTE_URL = "https://api.tomtom.com/routing/1/calculateRoute/{locations}/json"
 GEOCODE_URL = "https://api.tomtom.com/search/2/geocode/{query}.json"
@@ -34,12 +34,12 @@ class TomTomProvider(CarProvider):
         self._language = language
         self._bias = bias
 
-    async def departure_for_arrival(
+    async def trip_for_arrival(
         self,
         origin: tuple[float, float],
         destination: tuple[float, float],
         arrive_at: datetime,
-    ) -> datetime:
+    ) -> Trip:
         locations = f"{origin[0]},{origin[1]}:{destination[0]},{destination[1]}"
         data = await self._get(
             ROUTE_URL.format(locations=locations),
@@ -49,7 +49,7 @@ class TomTomProvider(CarProvider):
                 "arriveAt": dt_util.as_utc(arrive_at).strftime("%Y-%m-%dT%H:%M:%SZ"),
             },
         )
-        return parse_departure(data)
+        return parse_trip(data)
 
     async def search_places(self, query: str) -> list[Place]:
         params = {"limit": "8", "language": LANGUAGE_TAGS.get(self._language, "de-DE")}
@@ -75,15 +75,21 @@ class TomTomProvider(CarProvider):
             raise ProviderError(f"TomTom can't be reached: {err}") from err
 
 
-def parse_departure(data: dict[str, Any]) -> datetime:
+def parse_trip(data: dict[str, Any]) -> Trip:
     try:
-        value = data["routes"][0]["summary"]["departureTime"]
+        summary = data["routes"][0]["summary"]
+        value = summary["departureTime"]
     except (KeyError, IndexError, TypeError) as err:
         raise ProviderError("TomTom found no route") from err
     parsed = dt_util.parse_datetime(value)
     if parsed is None:
         raise ProviderError(f"TomTom sent an unreadable time: {value}")
-    return dt_util.as_utc(parsed)
+    return Trip(
+        departure=dt_util.as_utc(parsed),
+        travel_seconds=int(summary.get("travelTimeInSeconds", 0)),
+        traffic_delay_seconds=int(summary.get("trafficDelayInSeconds", 0)),
+        length_meters=int(summary.get("lengthInMeters", 0)),
+    )
 
 
 def parse_places(data: dict[str, Any]) -> list[Place]:

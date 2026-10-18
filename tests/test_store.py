@@ -127,5 +127,14 @@ async def test_old_routes_cleaned_on_load(hass: HomeAssistant, store: AndiamoSto
     await again.async_load()
     assert again.routes == [
         {"id": "r1", "name": "Old", "mode": "transit", "origin_id": home["id"],
-         "destination_id": None, "station_id": None, "lines": []}
+         "destination_id": None, "station_id": None, "speaker": "media_player.x",
+         "lines": []}
     ]
+
+
+async def test_old_car_runs_load(hass: HomeAssistant, store: AndiamoStore) -> None:
+    store.car_runs = {"r1": "2026-10-19T10:00:00+00:00"}
+    await store.async_save()
+    again = AndiamoStore(hass)
+    await again.async_load()
+    assert again.car_runs == {"r1": {"arrive_at": "2026-10-19T10:00:00+00:00"}}

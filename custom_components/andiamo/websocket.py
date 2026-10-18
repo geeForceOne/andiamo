@@ -71,6 +71,7 @@ ROUTE = vol.Schema(
         vol.Optional("destination_id", default=None): _OPTIONAL_STR,
         vol.Optional("station_id", default=None): _OPTIONAL_STR,
         vol.Optional("lines", default=list): [LINE],
+        vol.Optional("speaker", default=None): _OPTIONAL_STR,
     }
 )
 def _template(value: str) -> str:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 import pytest
 
@@ -16,7 +16,7 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.andiamo.const import EVENT_ANNOUNCEMENT
 from custom_components.andiamo.providers import Departure, ProviderError
-from custom_components.andiamo.runner import RunManager
+from custom_components.andiamo.runner import RunManager, arrival
 from custom_components.andiamo.store import DataError, AndiamoStore
 
 # 10:00 in Zurich.
@@ -308,17 +308,17 @@ async def test_car_resumes_after_restart(
 async def test_car_resume_retries_when_provider_fails(
     hass: HomeAssistant, runs: RunManager, store, routes, transit, car, said, clock
 ) -> None:
-    store.car_runs[routes["car"]["id"]] = at(100).isoformat()
+    store.car_runs[routes["car"]["id"]] = {"arrive_at": at(100).isoformat()}
 
     async def failing(*args):
         raise ProviderError("offline")
 
-    working = car.departure_for_arrival
-    car.departure_for_arrival = failing
+    working = car.trip_for_arrival
+    car.trip_for_arrival = failing
     await runs.async_resume()
     assert runs.runs[routes["car"]["id"]].leave_at is None
 
-    car.departure_for_arrival = working
+    car.trip_for_arrival = working
     car.departure = at(60)
     await go_to(hass, clock, at(3))
     assert runs.runs[routes["car"]["id"]].leave_at == at(60)
@@ -329,3 +329,37 @@ async def test_car_route_needs_time(runs: RunManager, routes) -> None:
         await runs.async_press(routes["car"]["id"])
     with pytest.raises(DataError, match="passed"):
         await runs.async_start_car(routes["car"]["id"], at(-1))
+
+
+async def test_speaker_run_then_route_then_settings(
+    runs: RunManager, store, routes, car
+) -> None:
+    store.settings["speaker"] = "media_player.default"
+    car.departure = at(80)
+    await runs.async_start_car(routes["car"]["id"], at(120))
+    run = runs.runs[routes["car"]["id"]]
+    assert run.speaker == "media_player.default"
+    routes["car"]["speaker"] = "media_player.route"
+    assert run.speaker == "media_player.route"
+    await runs.async_start(routes["car"]["id"], at(120), speaker="media_player.once")
+    assert runs.runs[routes["car"]["id"]].speaker == "media_player.once"
+
+
+async def test_start_restarts_a_running_transit_route(
+    runs: RunManager, routes, transit, said
+) -> None:
+    transit.result = [connection(20)]
+    await runs.async_start(routes["transit"]["id"])
+    await runs.async_start(routes["transit"]["id"], speaker="media_player.kitchen")
+    # Not cancelled the way the button does: it runs again, on the new speaker.
+    assert runs.runs[routes["transit"]["id"]].speaker == "media_player.kitchen"
+    assert len(said()) == 2
+
+
+async def test_arrival_rolls_a_passed_time_to_tomorrow(store) -> None:
+    # It's 10:00 in Zurich.
+    assert arrival(time(12, 0)) == at(120)
+    assert arrival(time(9, 0)) == at(23 * 60)
+    assert arrival(time(9, 0), date(2026, 10, 19)) == at(23 * 60)
+    # Another day is taken as it is, even when it has passed.
+    assert arrival(time(9, 0), date(2026, 10, 18)) == at(-25 * 60)

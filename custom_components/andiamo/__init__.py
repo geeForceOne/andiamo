@@ -6,12 +6,15 @@ from dataclasses import dataclass, field
 import hashlib
 from pathlib import Path
 
+import voluptuous as vol
+
 from homeassistant.components import frontend, panel_custom
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, service
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
 
@@ -69,6 +72,22 @@ type AndiamoConfigEntry = ConfigEntry[AndiamoRuntime]
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Websocket commands and the frontend files, once per HA start."""
     websocket.async_register(hass)
+    # Actions on a route's "leave at" sensor, for automations and scripts.
+    service.async_register_platform_entity_service(
+        hass,
+        DOMAIN,
+        "start",
+        entity_domain=SENSOR_DOMAIN,
+        schema={
+            vol.Optional("time"): cv.time,
+            vol.Optional("date"): cv.date,
+            vol.Optional("speaker"): cv.entity_domain("media_player"),
+        },
+        func="async_start_route",
+    )
+    service.async_register_platform_entity_service(
+        hass, DOMAIN, "stop", entity_domain=SENSOR_DOMAIN, schema=None, func="async_stop_route"
+    )
     await hass.http.async_register_static_paths(
         [StaticPathConfig(STATIC_URL, str(FRONTEND_DIR), cache_headers=False)]
     )

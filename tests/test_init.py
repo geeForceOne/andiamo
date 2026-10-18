@@ -9,6 +9,7 @@ import pytest
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
@@ -178,3 +179,60 @@ async def test_message_templates(hass: HomeAssistant, ws) -> None:
     typo = await ws("settings", changes={"templates": {"de": {"go_now": "Ab um {tme}!"}}})
     assert not typo["success"]
     assert "tme" in typo["error"]["message"]
+
+
+async def test_start_and_stop_actions(hass: HomeAssistant, ws, car, transit) -> None:
+    home = (await ws.state())["locations"][0]["id"]
+    gf = (await ws("location/save", item={"name": "GF", "latitude": 47.2, "longitude": 8.3}))["result"]
+    route = (await ws(
+        "route/save", item={"name": "GF", "mode": "car", "origin_id": home, "destination_id": gf["id"]}
+    ))["result"]
+    await hass.async_block_till_done()
+    sensor = er.async_get(hass).async_get_entity_id("sensor", DOMAIN, f"{route['id']}_leave")
+    runtime = hass.data[DOMAIN]
+
+    car.departure = at(80)
+    await hass.services.async_call(
+        DOMAIN,
+        "start",
+        {"time": "12:00", "date": "2026-10-19", "speaker": "media_player.kitchen"},
+        target={"entity_id": sensor},
+        blocking=True,
+    )
+    run = runtime.runs.runs[route["id"]]
+    assert run.arrive_at == at(120)
+    assert run.speaker == "media_player.kitchen"
+    assert runtime.store.car_runs[route["id"]]["speaker"] == "media_player.kitchen"
+    # The drive time stays for the route list.
+    assert (await ws.state())["trips"][route["id"]] == {
+        "travel_minutes": 41, "traffic_minutes": 3, "length_km": 32.4
+    }
+
+    await hass.services.async_call(DOMAIN, "stop", target={"entity_id": sensor}, blocking=True)
+    assert runtime.runs.runs == {}
+    # Stopping a route that isn't running is fine.
+    await hass.services.async_call(DOMAIN, "stop", target={"entity_id": sensor}, blocking=True)
+
+    with pytest.raises(HomeAssistantError, match="set an arrival time"):
+        await hass.services.async_call(
+            DOMAIN, "start", target={"entity_id": sensor}, blocking=True
+        )
+
+
+async def test_start_action_time_is_for_cars(hass: HomeAssistant, ws, transit) -> None:
+    home = (await ws.state())["locations"][0]["id"]
+    await ws(
+        "station/save",
+        item={"location_id": home, "name": "Tram", "stop_ref": "ch:1:sloid:1", "walk_minutes": 5},
+    )
+    route = (await ws("route/save", item={
+        "name": "Work", "mode": "transit", "origin_id": home,
+        "lines": [{"key": "10|Flughafen", "name": "10", "destination": "Flughafen"}],
+    }))["result"]
+    await hass.async_block_till_done()
+    sensor = er.async_get(hass).async_get_entity_id("sensor", DOMAIN, f"{route['id']}_leave")
+
+    with pytest.raises(HomeAssistantError, match="Time only works for car routes"):
+        await hass.services.async_call(
+            DOMAIN, "start", {"time": "12:00"}, target={"entity_id": sensor}, blocking=True
+        )

@@ -19,7 +19,8 @@ const T = {
   noKeyCar: "No TomTom key: car routes and address search are off.",
   keysHint: "API keys: Settings → Devices & services → Andiamo → Reconfigure.",
   deleteConfirm: "Delete {0}? Click again to confirm.", delay: "+{0} min",
-  german: "German", english: "English", badTime: "Enter a time like {0}.",
+  german: "German", english: "English", badTime: "Enter a time like {0}.", badDate: "Enter a date like {0}.",
+  date: "Date", defaultSpeaker: "Default ({0})", drive: "{0} min drive", traffic: "+{0} min traffic", km: "{0} km",
   messages: "Messages ({0})", messagesHint: "Leave a message empty to use the default. Placeholders:",
   msg_leave_at: "Leave at", msg_changed: "New time", msg_traffic_changed: "Traffic changed",
   msg_minutes_left: "Minutes left", msg_go_now: "Go now", msg_cancelled: "Cancelled", msg_no_connection: "No connection",
@@ -54,7 +55,6 @@ const clock = (iso) => {
 };
 const minutesUntil = (iso) => Math.max(0, Math.round((new Date(iso) - Date.now()) / 60000));
 
-// "18:30" → the next 18:30 (today, or tomorrow if it has passed), as ISO.
 // What people type in "Arrive by": "18:30", "1830", "6:30 pm", "6pm" → "18:30"; anything else → null.
 const parseTime = (text) => {
   const m = String(text).trim().toLowerCase().match(/^(\d{1,2})(?:[:.h]?(\d{2}))?\s*(am|pm|a|p)?$/);
@@ -73,12 +73,66 @@ const showTime = (hhmm) => {
   const [h, m] = hhmm.split(":").map(Number);
   return clock(new Date(2000, 0, 1, h, m).toISOString());
 };
-const nextTime = (hhmm) => {
+
+// Dates follow the user's HA date format too: day, month and year in its order, with the language's separator.
+const pad = (n) => String(n).padStart(2, "0");
+const ymdOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const today = () => ymdOf(new Date());
+const dateParts = () => {
+  const format = haLocale?.date_format;
+  const language = format === "system" ? undefined : haLocale?.language;
+  const parts = new Intl.DateTimeFormat(language, { day: "2-digit", month: "2-digit", year: "numeric" }).formatToParts(new Date(2000, 11, 31));
+  const order = ["DMY", "MDY", "YMD"].includes(format)
+    ? [...format].map((c) => ({ D: "day", M: "month", Y: "year" })[c])
+    : parts.filter((p) => p.type !== "literal").map((p) => p.type);
+  const sep = parts.find((p) => p.type === "literal")?.value.trim() || "/";
+  return { order, sep };
+};
+// "2026-10-19" in the user's HA date format.
+const showDate = (ymd) => {
+  const [year, month, day] = ymd.split("-");
+  const value = { year, month, day };
+  const { order, sep } = dateParts();
+  return order.map((k) => value[k]).join(sep);
+};
+// What people type in "Date": "19.10", "19.10.26", "19.10.2026", "2026-10-19", "today", "tomorrow" → "2026-10-19"; anything else → null.
+const parseDate = (text) => {
+  const t = String(text).trim().toLowerCase();
+  const now = new Date();
+  if (t === "" || t === "today") return today();
+  if (t === "tomorrow") return ymdOf(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
+  const nums = t.split(/[^0-9]+/).filter(Boolean).map(Number);
+  let order = /^\d{4}-/.test(t) ? ["year", "month", "day"] : dateParts().order;
+  if (nums.length === 2) order = order.filter((k) => k !== "year");
+  if (nums.length !== order.length) return null;
+  const v = Object.fromEntries(order.map((k, i) => [k, nums[i]]));
+  let year = v.year ?? now.getFullYear();
+  if (year < 100) year += 2000;
+  let d = new Date(year, v.month - 1, v.day);
+  if (d.getMonth() !== v.month - 1 || d.getDate() !== v.day) return null;
+  // Without a year, a day that has passed means next year.
+  if (v.year === undefined && ymdOf(d) < today()) d = new Date(year + 1, v.month - 1, v.day);
+  return ymdOf(d);
+};
+// "18:30" on "2026-10-19" as ISO; a time already passed today means tomorrow.
+const arriveAt = (hhmm, ymd) => {
   const [h, m] = hhmm.split(":").map(Number);
-  const d = new Date();
-  d.setHours(h, m, 0, 0);
-  if (d <= new Date()) d.setDate(d.getDate() + 1);
-  return d.toISOString();
+  const [y, mo, d] = ymd.split("-").map(Number);
+  const when = new Date(y, mo - 1, d, h, m);
+  if (when <= new Date() && ymd === today()) when.setDate(when.getDate() + 1);
+  return when.toISOString();
+};
+// The arrival time, with the date when it isn't today.
+const arrival = (iso) => {
+  const ymd = ymdOf(new Date(iso));
+  return ymd === today() ? clock(iso) : `${showDate(ymd)} ${clock(iso)}`;
+};
+// "41 min drive · +3 min traffic · 32 km" from the last car trip planned.
+const driveText = (trip, t) => {
+  if (!trip) return "";
+  const km = trip.length_km >= 10 ? Math.round(trip.length_km) : trip.length_km;
+  return [t("drive", trip.travel_minutes), trip.traffic_minutes > 0 ? t("traffic", trip.traffic_minutes) : "", t("km", km.toLocaleString(haLocale?.language))]
+    .filter(Boolean).join(" · ");
 };
 
 class AndiamoPanel extends HTMLElement {
@@ -168,6 +222,8 @@ class AndiamoPanel extends HTMLElement {
       // Show a typed time the way HA shows times.
       const time = el.dataset.timefield !== undefined && e.type === "change" && parseTime(el.value);
       if (time) el.value = this._drafts[key][name] = showTime(time);
+      const date = el.dataset.datefield !== undefined && e.type === "change" && parseDate(el.value);
+      if (date) el.value = this._drafts[key][name] = showDate(date);
     }
     if (el.dataset.setting && e.type === "change") {
       let value = el.type === "checkbox" ? el.checked : el.value;
@@ -213,7 +269,9 @@ class AndiamoPanel extends HTMLElement {
         if (!typed) return;
         const time = parseTime(typed);
         if (!time) { this._error = this._t("badTime", showTime("18:30")); break; }
-        await this._ws("start_car", { route_id: arg, arrive_at: nextTime(time) });
+        const date = parseDate(d[`start:${arg}`]?.date ?? "");
+        if (!date) { this._error = this._t("badDate", showDate(today())); break; }
+        await this._ws("start_car", { route_id: arg, arrive_at: arriveAt(time, date) });
         delete d[`start:${arg}`];
         return;
       }
@@ -304,6 +362,7 @@ class AndiamoPanel extends HTMLElement {
       destination_id: transit ? null : r.destination_id,
       station_id: transit ? r.station_id || null : null,
       lines: transit ? r.lines || [] : [],
+      speaker: r.speaker || null,
     };
     if (r.id) item.id = r.id;
     await this._ws("route/save", { item });
@@ -405,26 +464,30 @@ class AndiamoPanel extends HTMLElement {
       const lines = (r.lines || []).map((l) => `${l.name} → ${l.destination}`).join(", ");
       where = `${esc(from)}${s ? ` · ${esc(s.name)}` : ""} · ${lines ? esc(lines) : `<span class="late">${this._t("pickLine")}</span>`}`;
     } else {
-      where = `${esc(from)} → ${esc(this._loc(r.destination_id)?.name)}`;
+      // The name already says where; show how long the drive is instead.
+      where = esc(driveText(this._data.trips?.[r.id], (k, v) => this._t(k, v)));
     }
     let action;
     if (run) {
       const delay = run.delay_minutes ? ` <span class="late">${this._t("delay", run.delay_minutes)}</span>` : "";
-      const line = run.line ? ` · ${esc(run.line)} ${run.departure ? clock(run.departure) : ""}${delay}` : "";
+      const line = run.line ? ` · ${esc(run.line)} ${run.departure ? clock(run.departure) : ""}${delay}`
+        : run.arrive_at ? ` · ${this._t("arriveBy")} ${esc(arrival(run.arrive_at))}` : "";
       action = `<span class="run">${run.leave_at ? `${this._t("leaveAt", clock(run.leave_at))} · ${this._t("inMin", minutesUntil(run.leave_at))}` : this._t("running")}${line}</span>
         <button data-action="cancel-run" data-arg="${r.id}">${this._t("stop")}</button>`;
     } else if (r.mode === "transit") {
       action = `<button class="primary" data-action="press" data-arg="${r.id}" ${this._data.providers.transit && r.lines?.length ? "" : "disabled"}>${this._t("start")}</button>`;
     } else {
       const key = `start:${r.id}`;
+      const date = this._drafts[key]?.date ?? showDate(today());
       action = `<label class="inline">${this._t("arriveBy")} ${this._input(key, "time", `type="text" class="time" data-timefield placeholder="${esc(showTime("18:30"))}" data-enter="start-car" data-arg="${r.id}"`)}</label>
+        <input data-draft="${key}|date" value="${esc(date)}" type="text" class="date" data-datefield data-enter="start-car" data-arg="${r.id}" aria-label="${this._t("date")}">
         <button class="primary" data-action="start-car" data-arg="${r.id}" ${this._data.providers.car ? "" : "disabled"}>${this._t("start")}</button>`;
     }
     return `
       <div class="row ${run ? "active" : ""}">
         <div class="grow clickable" data-action="open" data-arg="route:${r.id}" title="${this._t("edit")}">
           <div class="title">${icon} ${esc(r.name)}</div>
-          <div class="muted">${where}</div>
+          ${where ? `<div class="muted">${where}</div>` : ""}
         </div>
         <div class="actions">${action}${this._deleteBtn(`route:${r.id}`, r.name)}</div>
       </div>`;
@@ -444,6 +507,10 @@ class AndiamoPanel extends HTMLElement {
     } else {
       fields = `<label>${this._t("to")} ${this._select(key, "destination_id", places)}</label>`;
     }
+    const settings = this._data.settings.speaker;
+    const fallback = settings ? this._hass.states[settings]?.attributes.friendly_name || settings : this._t("none");
+    const speakers = [["", this._t("defaultSpeaker", fallback)], ...this._entities("media_player")];
+    fields += `<label>${this._t("speaker")} ${this._select(key, "speaker", speakers)}</label>`;
     const ready = !transit || r.lines?.length;
     return `
       <div class="form">
@@ -678,6 +745,7 @@ const STYLE = `
   .setting .control { display: flex; align-items: center; gap: 6px; }
   .setting select { min-width: 240px; }
   input.time { width: 90px; }
+  input.date { width: 100px; }
   .setting input[type="number"] { width: 80px; }
   .setting .control:has(.message) { flex: 1; min-width: 240px; }
   .setting input.message { width: 100%; }

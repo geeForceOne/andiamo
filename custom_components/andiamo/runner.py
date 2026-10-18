@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 import logging
 from typing import Any
 
@@ -25,11 +25,22 @@ from .const import (
     TRANSIT_RECHECK,
     TRANSIT_REMINDER,
 )
-from .providers import CarProvider, Departure, ProviderError, TransitProvider
+from .providers import CarProvider, Departure, ProviderError, TransitProvider, Trip
 from .store import DataError, AndiamoStore
 from .texts import clock, minutes, minutes_until, text
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def arrival(time_of_day: time, day: date | None = None) -> datetime:
+    """An arrival time in HA's time zone; a time already passed today means tomorrow."""
+    now = dt_util.now()
+    day = day or now.date()
+    zone = dt_util.get_default_time_zone()
+    when = datetime.combine(day, time_of_day, tzinfo=zone)
+    if when <= now and day == now.date():
+        when = datetime.combine(day + timedelta(days=1), time_of_day, tzinfo=zone)
+    return when
 
 
 class RunManager:
@@ -52,8 +63,8 @@ class RunManager:
 
     async def async_resume(self) -> None:
         """Pick up car countdowns that were set up before a restart."""
-        for route_id, arrive_at in list(self.store.car_runs.items()):
-            arrive = dt_util.parse_datetime(arrive_at)
+        for route_id, saved in list(self.store.car_runs.items()):
+            arrive = dt_util.parse_datetime(saved.get("arrive_at") or "")
             try:
                 route = self.store.route(route_id)
             except DataError:
@@ -61,7 +72,7 @@ class RunManager:
             if route is None or arrive is None or arrive <= dt_util.utcnow():
                 self.store.car_runs.pop(route_id)
                 continue
-            run = CarRun(self, route, arrive)
+            run = CarRun(self, route, arrive, saved.get("speaker"))
             self.runs[route_id] = run
             try:
                 await run.async_start()
@@ -77,10 +88,29 @@ class RunManager:
         if route_id in self.runs:
             await self.async_cancel(route_id)
             return
+        await self.async_start_transit(route_id)
+
+    async def async_start(
+        self, route_id: str, arrive_at: datetime | None = None, speaker: str | None = None
+    ) -> None:
+        """Start any route, e.g. from an action; a running one starts over."""
+        route = self.store.route(route_id)
+        if route["mode"] == MODE_CAR:
+            if arrive_at is None:
+                raise DataError(f"{route['name']} is a car route; set an arrival time")
+            await self.async_start_car(route_id, arrive_at, speaker)
+            return
+        if arrive_at is not None:
+            raise DataError("Time only works for car routes")
+        if route_id in self.runs:
+            await self.async_cancel(route_id, say=False)
+        await self.async_start_transit(route_id, speaker)
+
+    async def async_start_transit(self, route_id: str, speaker: str | None = None) -> None:
         route = self.store.route(route_id)
         if route["mode"] != MODE_TRANSIT:
             raise DataError(f"{route['name']} is a car route; set an arrival time")
-        run = TransitRun(self, route)
+        run = TransitRun(self, route, speaker)
         self.runs[route_id] = run
         try:
             await run.async_start()
@@ -90,7 +120,9 @@ class RunManager:
         finally:
             self.changed()
 
-    async def async_start_car(self, route_id: str, arrive_at: datetime) -> None:
+    async def async_start_car(
+        self, route_id: str, arrive_at: datetime, speaker: str | None = None
+    ) -> None:
         route = self.store.route(route_id)
         if route["mode"] != MODE_CAR:
             raise DataError(f"{route['name']} is not a car route")
@@ -98,13 +130,16 @@ class RunManager:
             raise DataError("The arrival time has already passed")
         if route_id in self.runs:
             await self.async_cancel(route_id, say=False)
-        run = CarRun(self, route, dt_util.as_utc(arrive_at))
+        run = CarRun(self, route, dt_util.as_utc(arrive_at), speaker)
         await run.async_start()
         if run.finished:
             # Already time to go; "go now" has been said.
             return
         self.runs[route_id] = run
-        self.store.car_runs[route_id] = run.arrive_at.isoformat()
+        self.store.car_runs[route_id] = {
+            "arrive_at": run.arrive_at.isoformat(),
+            "speaker": speaker,
+        }
         await self.store.async_save(notify=False)
         self.changed()
 
@@ -145,10 +180,14 @@ class Run:
 
     mode: str
 
-    def __init__(self, manager: RunManager, route: dict[str, Any]) -> None:
+    def __init__(
+        self, manager: RunManager, route: dict[str, Any], speaker: str | None = None
+    ) -> None:
         self.manager = manager
         self.hass = manager.hass
         self.route = route
+        # A speaker for this run only, e.g. from an action.
+        self.speaker_override = speaker
         self.leave_at: datetime | None = None
         self.announced = False
         self._timers: list[CALLBACK_TYPE] = []
@@ -163,10 +202,18 @@ class Run:
     def language(self) -> str:
         return self.manager.store.settings.get("language", "de")
 
+    @property
+    def speaker(self) -> str | None:
+        """This run's speaker, else the route's, else the one in Settings."""
+        return (
+            self.speaker_override
+            or self.route.get("speaker")
+            or self.manager.store.settings.get("speaker")
+        )
+
     async def say(self, message: str) -> None:
         self.announced = True
-        speaker = self.manager.store.settings.get("speaker")
-        await self.manager.announcer.async_say(message, self.route, speaker)
+        await self.manager.announcer.async_say(message, self.route, self.speaker)
 
     def message(self, key: str, left: int | None = None) -> str:
         """A message with every placeholder filled, from the user's template if set."""
@@ -255,8 +302,10 @@ class TransitRun(Run):
 
     mode = MODE_TRANSIT
 
-    def __init__(self, manager: RunManager, route: dict[str, Any]) -> None:
-        super().__init__(manager, route)
+    def __init__(
+        self, manager: RunManager, route: dict[str, Any], speaker: str | None = None
+    ) -> None:
+        super().__init__(manager, route, speaker)
         if not route.get("lines"):
             raise DataError(f"Pick a line for {route['name']}")
         self.station = manager.store.route_station(route)
@@ -368,9 +417,13 @@ class CarRun(Run):
     mode = MODE_CAR
 
     def __init__(
-        self, manager: RunManager, route: dict[str, Any], arrive_at: datetime
+        self,
+        manager: RunManager,
+        route: dict[str, Any],
+        arrive_at: datetime,
+        speaker: str | None = None,
     ) -> None:
-        super().__init__(manager, route)
+        super().__init__(manager, route, speaker)
         self.arrive_at = arrive_at
         store = manager.store
         self.origin = store.location(route["origin_id"])
@@ -383,11 +436,26 @@ class CarRun(Run):
         return timedelta(minutes=self.manager.store.settings.get("car_lead_minutes", 30))
 
     async def _departure(self) -> datetime:
-        return await self.manager.car().departure_for_arrival(
+        trip = await self.manager.car().trip_for_arrival(
             (self.origin["latitude"], self.origin["longitude"]),
             (self.destination["latitude"], self.destination["longitude"]),
             self.arrive_at,
         )
+        await self._remember(trip)
+        return trip.departure
+
+    async def _remember(self, trip: Trip) -> None:
+        """Keep the drive time for the route list, also after the run."""
+        drive = {
+            "travel_minutes": round(trip.travel_seconds / 60),
+            "traffic_minutes": round(trip.traffic_delay_seconds / 60),
+            "length_km": round(trip.length_meters / 1000, 1),
+        }
+        trips = self.manager.store.trips
+        if trips.get(self.route["id"]) != drive:
+            trips[self.route["id"]] = drive
+            await self.manager.store.async_save(notify=False)
+            self.manager.changed()
 
     async def async_start(self) -> None:
         self.leave_at = await self._departure()

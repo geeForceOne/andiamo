@@ -1,0 +1,26 @@
+start:
+  target:
+    entity:
+      integration: andiamo
+      domain: sensor
+  fields:
+    time:
+      example: "18:30"
+      selector:
+        time:
+    date:
+      example: "2026-10-19"
+      selector:
+        date:
+    speaker:
+      example: media_player.kitchen
+      selector:
+        entity:
+          filter:
+            domain: media_player
+
+stop:
+  target:
+    entity:
+      integration: andiamo
+      domain: sensor

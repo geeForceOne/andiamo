@@ -65,7 +65,7 @@ Open **Andiamo** in the sidebar.
 
 1. **Places:** your home is there already as the main place. Add more places (e.g. *Office*, *Climbing gym*) by address search or coordinates.
 2. **Stations:** under a place, search for a stop and set how many minutes you walk there. The first one is the main station; any station can be made main.
-3. **Routes:** a public transport route boards at a station (the main one unless you pick another) and takes the lines you tick, e.g. *10 → Zürich Flughafen*; the form lists the lines leaving that station. A car route goes from one place to another, e.g. *Home → Climbing gym*.
+3. **Routes:** a public transport route boards at a station (the main one unless you pick another) and takes the lines you tick, e.g. *10 → Zürich Flughafen*; the form lists the lines leaving that station. A car route goes from one place to another, e.g. *Home → Climbing gym*. Every route announces on the speaker from Settings, unless you pick another one for it.
 4. **Settings:** text-to-speech entity, speaker, language, when the car countdown starts, and **test mode** (announcements appear as notifications instead of on the speaker).
 
 ## Use
@@ -82,8 +82,20 @@ Open **Andiamo** in the sidebar.
         entity_id: button.andiamo_home_office
   ```
 
-- Add the **Andiamo** card to a dashboard (`type: custom:andiamo-card`, optional `mode: car` or `transit`, `routes: [Home → Office]`, `title:`). It starts routes and sets "arrive by" for car routes.
+- Add the **Andiamo** card to a dashboard (`type: custom:andiamo-card`, optional `mode: car` or `transit`, `routes: [Home → Office]`, `title:`). It starts routes and sets "arrive by" (time and date, today unless you change it) for car routes.
 - Each route has a sensor (`sensor.andiamo_…`) with the leave time while a countdown runs.
+- Start and stop any route from automations and scripts with the `andiamo.start` and `andiamo.stop` actions, aimed at the route's sensor. Car routes need a time; the date is optional (today, or tomorrow if the time has passed). `speaker` announces on another speaker for this run only. Starting a route that is already running starts it over.
+
+  ```yaml
+  actions:
+    - action: andiamo.start
+      target:
+        entity_id: sensor.andiamo_home_climbing_gym
+      data:
+        time: "18:30"
+        date: "2026-10-24"
+        speaker: media_player.kitchen
+  ```
 - Every announcement is also fired as the event `andiamo_announcement` (with `route` and `message`), e.g. to send it to your phone too.
 
 ## Development

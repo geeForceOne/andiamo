@@ -1,0 +1,10 @@
+{
+  "services": {
+    "start": {
+      "service": "mdi:play"
+    },
+    "stop": {
+      "service": "mdi:stop"
+    }
+  }
+}

@@ -8,7 +8,7 @@
 const T = {
   start: "Start", stop: "Stop", arriveBy: "Arrive by", leaveAt: "Leave at {0}", inMin: "in {0} min",
   running: "Running", noRoutes: "No routes. Add them on the Andiamo page.", delay: "+{0} min",
-  badTime: "Enter a time like {0}."
+  badTime: "Enter a time like {0}.", badDate: "Enter a date like {0}.", date: "Date"
 };
 
 // A route's icon follows its lines: all trams 🚋, all buses 🚌, anything else (trains, mixed) 🚆.
@@ -47,12 +47,59 @@ const showTime = (hhmm) => {
   const [h, m] = hhmm.split(":").map(Number);
   return clock(new Date(2000, 0, 1, h, m).toISOString());
 };
-const nextTime = (hhmm) => {
+
+// Dates follow the user's HA date format too: day, month and year in its order, with the language's separator.
+const pad = (n) => String(n).padStart(2, "0");
+const ymdOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const today = () => ymdOf(new Date());
+const dateParts = () => {
+  const format = haLocale?.date_format;
+  const language = format === "system" ? undefined : haLocale?.language;
+  const parts = new Intl.DateTimeFormat(language, { day: "2-digit", month: "2-digit", year: "numeric" }).formatToParts(new Date(2000, 11, 31));
+  const order = ["DMY", "MDY", "YMD"].includes(format)
+    ? [...format].map((c) => ({ D: "day", M: "month", Y: "year" })[c])
+    : parts.filter((p) => p.type !== "literal").map((p) => p.type);
+  const sep = parts.find((p) => p.type === "literal")?.value.trim() || "/";
+  return { order, sep };
+};
+// "2026-10-19" in the user's HA date format.
+const showDate = (ymd) => {
+  const [year, month, day] = ymd.split("-");
+  const value = { year, month, day };
+  const { order, sep } = dateParts();
+  return order.map((k) => value[k]).join(sep);
+};
+// What people type in "Date": "19.10", "19.10.26", "19.10.2026", "2026-10-19", "today", "tomorrow" → "2026-10-19"; anything else → null.
+const parseDate = (text) => {
+  const t = String(text).trim().toLowerCase();
+  const now = new Date();
+  if (t === "" || t === "today") return today();
+  if (t === "tomorrow") return ymdOf(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
+  const nums = t.split(/[^0-9]+/).filter(Boolean).map(Number);
+  let order = /^\d{4}-/.test(t) ? ["year", "month", "day"] : dateParts().order;
+  if (nums.length === 2) order = order.filter((k) => k !== "year");
+  if (nums.length !== order.length) return null;
+  const v = Object.fromEntries(order.map((k, i) => [k, nums[i]]));
+  let year = v.year ?? now.getFullYear();
+  if (year < 100) year += 2000;
+  let d = new Date(year, v.month - 1, v.day);
+  if (d.getMonth() !== v.month - 1 || d.getDate() !== v.day) return null;
+  // Without a year, a day that has passed means next year.
+  if (v.year === undefined && ymdOf(d) < today()) d = new Date(year + 1, v.month - 1, v.day);
+  return ymdOf(d);
+};
+// "18:30" on "2026-10-19" as ISO; a time already passed today means tomorrow.
+const arriveAt = (hhmm, ymd) => {
   const [h, m] = hhmm.split(":").map(Number);
-  const d = new Date();
-  d.setHours(h, m, 0, 0);
-  if (d <= new Date()) d.setDate(d.getDate() + 1);
-  return d.toISOString();
+  const [y, mo, d] = ymd.split("-").map(Number);
+  const when = new Date(y, mo - 1, d, h, m);
+  if (when <= new Date() && ymd === today()) when.setDate(when.getDate() + 1);
+  return when.toISOString();
+};
+// The arrival time, with the date when it isn't today.
+const arrival = (iso) => {
+  const ymd = ymdOf(new Date(iso));
+  return ymd === today() ? clock(iso) : `${showDate(ymd)} ${clock(iso)}`;
 };
 
 class AndiamoCard extends HTMLElement {
@@ -60,20 +107,25 @@ class AndiamoCard extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._times = {};
+    this._dates = {};
     this.shadowRoot.addEventListener("click", (e) => {
       const el = e.target.closest("[data-action]");
       if (el) this._act(el.dataset.action, el.dataset.route);
     });
     this.shadowRoot.addEventListener("input", (e) => {
       if (e.target.dataset.time) this._times[e.target.dataset.time] = e.target.value;
+      if (e.target.dataset.date) this._dates[e.target.dataset.date] = e.target.value;
     });
-    // Show a typed time the way HA shows times.
+    // Show a typed time or date the way HA shows them.
     this.shadowRoot.addEventListener("change", (e) => {
       const time = e.target.dataset.time && parseTime(e.target.value);
       if (time) e.target.value = this._times[e.target.dataset.time] = showTime(time);
+      const date = e.target.dataset.date && parseDate(e.target.value);
+      if (date) e.target.value = this._dates[e.target.dataset.date] = showDate(date);
     });
     this.shadowRoot.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && e.target.dataset.time) this._act("start-car", e.target.dataset.time);
+      const routeId = e.target.dataset.time || e.target.dataset.date;
+      if (e.key === "Enter" && routeId) this._act("start-car", routeId);
     });
   }
 
@@ -139,8 +191,15 @@ class AndiamoCard extends HTMLElement {
           this._render();
           return;
         }
-        await this._hass.callWS({ type: "andiamo/start_car", route_id: routeId, arrive_at: nextTime(time) });
+        const date = parseDate(this._dates[routeId] ?? "");
+        if (!date) {
+          this._error = this._t("badDate", showDate(today()));
+          this._render();
+          return;
+        }
+        await this._hass.callWS({ type: "andiamo/start_car", route_id: routeId, arrive_at: arriveAt(time, date) });
         delete this._times[routeId];
+        delete this._dates[routeId];
       }
     } catch (err) {
       this._error = err.message || String(err);
@@ -169,16 +228,17 @@ class AndiamoCard extends HTMLElement {
     let info = "";
     if (run) {
       const delay = run.delay_minutes ? ` <span class="late">${this._t("delay", run.delay_minutes)}</span>` : "";
-      info = run.leave_at
+      info = `${run.leave_at
         ? `<div class="run">${this._t("leaveAt", clock(run.leave_at))} · ${this._t("inMin", minutesUntil(run.leave_at))}</div>
-           ${run.line ? `<div class="muted">${esc(run.line)} ${run.departure ? clock(run.departure) : ""}${delay}</div>` : ""}
-           ${run.arrive_at ? `<div class="muted">${this._t("arriveBy")} ${clock(run.arrive_at)}</div>` : ""}`
-        : `<div class="run">${this._t("running")}</div>`;
+           ${run.line ? `<div class="muted">${esc(run.line)} ${run.departure ? clock(run.departure) : ""}${delay}</div>` : ""}`
+        : `<div class="run">${this._t("running")}</div>`}
+        ${run.arrive_at ? `<div class="muted">${this._t("arriveBy")} ${esc(arrival(run.arrive_at))}</div>` : ""}`;
       right = `<button data-action="cancel" data-route="${r.id}">${this._t("stop")}</button>`;
     } else if (r.mode === "transit") {
       right = `<button class="primary" data-action="press" data-route="${r.id}">${this._t("start")}</button>`;
     } else {
       right = `<input type="text" class="time" data-time="${r.id}" value="${esc(this._times[r.id] || "")}" placeholder="${esc(showTime("18:30"))}" aria-label="${this._t("arriveBy")}">
+        <input type="text" class="date" data-date="${r.id}" value="${esc(this._dates[r.id] ?? showDate(today()))}" aria-label="${this._t("date")}">
         <button class="primary" data-action="start-car" data-route="${r.id}">${this._t("start")}</button>`;
     }
     return `<div class="row">
@@ -201,7 +261,8 @@ const STYLE = `
   button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--divider-color); background: none;
     color: var(--primary-text-color); cursor: pointer; }
   button.primary { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color); }
-  input.time { width: 90px; }
+  input.time { width: 70px; }
+  input.date { width: 90px; }
   input { font: inherit; padding: 5px 6px; border-radius: 6px; border: 1px solid var(--divider-color);
     background: var(--secondary-background-color); color: var(--primary-text-color); }
   .error { color: var(--error-color); padding: 4px 0; }

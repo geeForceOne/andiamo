@@ -16,6 +16,7 @@ from custom_components.andiamo.providers import (
     Place,
     Stop,
     TransitProvider,
+    Trip,
 )
 from custom_components.andiamo.runner import RunManager
 from custom_components.andiamo.store import AndiamoStore
@@ -52,10 +53,10 @@ class FakeCar(CarProvider):
         self.departure: datetime | None = None
         self.calls = 0
 
-    async def departure_for_arrival(self, origin, destination, arrive_at):
+    async def trip_for_arrival(self, origin, destination, arrive_at):
         self.calls += 1
         assert self.departure is not None
-        return self.departure
+        return Trip(self.departure, 2460, 180, 32411)
 
     async def search_places(self, query: str) -> list[Place]:
         return [Place(query, 47.0, 8.0)]

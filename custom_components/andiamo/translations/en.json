@@ -24,5 +24,29 @@
       "single_instance_allowed": "Andiamo is already set up.",
       "reconfigure_successful": "The API keys were saved."
     }
+  },
+  "services": {
+    "start": {
+      "name": "Start",
+      "description": "Starts a route's countdown. A route that is already running starts over.",
+      "fields": {
+        "time": {
+          "name": "Arrive by",
+          "description": "Car routes only: when you want to arrive. A time that has already passed today means tomorrow."
+        },
+        "date": {
+          "name": "Date",
+          "description": "Car routes only: the day you want to arrive. Leave it out for today."
+        },
+        "speaker": {
+          "name": "Speaker",
+          "description": "Announce on this speaker for this run only. Leave it out for the route's speaker, or the default one in Settings."
+        }
+      }
+    },
+    "stop": {
+      "name": "Stop",
+      "description": "Stops a route's countdown."
+    }
   }
 }

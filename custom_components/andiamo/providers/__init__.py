@@ -8,6 +8,7 @@ from .base import (
     ProviderError,
     Stop,
     TransitProvider,
+    Trip,
     lines_of,
 )
 
@@ -19,5 +20,6 @@ __all__ = [
     "ProviderError",
     "Stop",
     "TransitProvider",
+    "Trip",
     "lines_of",
 ]

@@ -9,7 +9,7 @@ import pytest
 
 from custom_components.andiamo.providers import ProviderError, lines_of
 from custom_components.andiamo.providers.ojp import parse_departures, parse_stops
-from custom_components.andiamo.providers.tomtom import parse_departure, parse_places
+from custom_components.andiamo.providers.tomtom import parse_places, parse_trip
 
 from .conftest import fixture
 
@@ -68,14 +68,17 @@ def test_stops() -> None:
     assert stops[1].modes == ()
 
 
-def test_tomtom_departure() -> None:
-    departure = parse_departure(json.loads(fixture("tomtom_route.json")))
-    assert departure == datetime(2026, 10, 19, 16, 19, tzinfo=UTC)
+def test_tomtom_trip() -> None:
+    trip = parse_trip(json.loads(fixture("tomtom_route.json")))
+    assert trip.departure == datetime(2026, 10, 19, 16, 19, tzinfo=UTC)
+    assert (trip.travel_seconds, trip.traffic_delay_seconds, trip.length_meters) == (
+        2460, 180, 32411
+    )
 
 
 def test_tomtom_no_route() -> None:
     with pytest.raises(ProviderError):
-        parse_departure({"routes": []})
+        parse_trip({"routes": []})
 
 
 def test_tomtom_places_skip_incomplete() -> None:

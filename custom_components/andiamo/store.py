@@ -52,8 +52,11 @@ class AndiamoStore:
         self.locations: list[dict[str, Any]] = []
         self.stations: list[dict[str, Any]] = []
         self.routes: list[dict[str, Any]] = []
-        # Car countdowns that were set up and must survive a restart.
-        self.car_runs: dict[str, str] = {}
+        # Car countdowns that were set up and must survive a restart:
+        # {route_id: {"arrive_at": iso, "speaker": entity or None}}.
+        self.car_runs: dict[str, dict[str, Any]] = {}
+        # The last car trip planned per route, to show the drive time.
+        self.trips: dict[str, dict[str, int]] = {}
 
     async def async_load(self) -> None:
         data = await self._store.async_load()
@@ -62,7 +65,11 @@ class AndiamoStore:
             self.locations = data.get("locations", [])
             self.stations = data.get("stations", [])
             self.routes = [_clean_route(r) for r in data.get("routes", [])]
-            self.car_runs = data.get("car_runs", {})
+            self.car_runs = {
+                route_id: run if isinstance(run, dict) else {"arrive_at": run}
+                for route_id, run in data.get("car_runs", {}).items()
+            }
+            self.trips = data.get("trips", {})
         if not self.locations:
             # The main location starts out as HA's home.
             self.locations.append(
@@ -87,6 +94,7 @@ class AndiamoStore:
             "locations": self.locations,
             "stations": self.stations,
             "routes": self.routes,
+            "trips": self.trips,
         }
         if include_runs:
             data["car_runs"] = self.car_runs
@@ -176,6 +184,13 @@ class AndiamoStore:
             if item["origin_id"] == item["destination_id"]:
                 raise DataError("Start and destination are the same")
             item = {**item, "station_id": None, "lines": []}
+            old = self._old_route(item)
+            if (old.get("origin_id"), old.get("destination_id")) != (
+                item["origin_id"],
+                item["destination_id"],
+            ):
+                # Another trip now; the last drive time no longer fits.
+                self.trips.pop(item.get("id"), None)
         else:
             raise DataError(f"Unknown mode {item['mode']}")
         route = _upsert(self.routes, item, has_main=False)
@@ -185,16 +200,21 @@ class AndiamoStore:
     async def async_delete_route(self, route_id: str) -> None:
         self.routes.remove(self.route(route_id))
         self.car_runs.pop(route_id, None)
+        self.trips.pop(route_id, None)
         await self.async_save()
+
+    def _old_route(self, item: dict[str, Any]) -> dict[str, Any]:
+        return next((r for r in self.routes if r["id"] == item.get("id")), {})
 
     def _stations_of(self, location_id: str) -> list[dict[str, Any]]:
         return [s for s in self.stations if s["location_id"] == location_id]
 
 
 def _clean_route(route: dict[str, Any]) -> dict[str, Any]:
-    """Drop fields older versions stored: the route speaker and buffer."""
-    route = {k: v for k, v in route.items() if k not in ("speaker", "buffer_minutes")}
+    """Drop the buffer older versions stored; fill in fields added since."""
+    route = {k: v for k, v in route.items() if k != "buffer_minutes"}
     route.setdefault("lines", [])
+    route.setdefault("speaker", None)
     if route["mode"] == MODE_TRANSIT:
         # The ticked lines replaced the destination; until some are picked
         # the route can't start.
