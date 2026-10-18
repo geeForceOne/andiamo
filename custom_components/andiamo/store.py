@@ -1,0 +1,237 @@
+"""Stored places, stations, routes and settings."""
+
+from __future__ import annotations
+
+from typing import Any
+import uuid
+
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.storage import Store
+
+from .const import (
+    DEFAULT_CAR_LEAD_MINUTES,
+    DEFAULT_LANGUAGE,
+    MODE_CAR,
+    MODE_TRANSIT,
+    SIGNAL_DATA_CHANGED,
+    STORAGE_KEY,
+    STORAGE_VERSION,
+)
+
+DEFAULT_SETTINGS: dict[str, Any] = {
+    "tts_entity": None,
+    "speaker": None,
+    "language": DEFAULT_LANGUAGE,
+    "car_lead_minutes": DEFAULT_CAR_LEAD_MINUTES,
+    "test_mode": False,
+}
+
+
+class DataError(HomeAssistantError):
+    """A change the stored data can't take, with a message for the user."""
+
+
+class AndiamoStore:
+    """Everything the user configures in the panel, kept in HA's storage.
+
+    Locations are places (Home, Work, Girlfriend). Stations belong to a
+    location and store the walking time to them. A public transport route
+    boards at a station of its start and takes the lines ticked for it; a car
+    route goes from one location to another. One location is the main one,
+    and each location has one main station.
+    """
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+        self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+        self.settings: dict[str, Any] = dict(DEFAULT_SETTINGS)
+        self.locations: list[dict[str, Any]] = []
+        self.stations: list[dict[str, Any]] = []
+        self.routes: list[dict[str, Any]] = []
+        # Car countdowns that were set up and must survive a restart.
+        self.car_runs: dict[str, str] = {}
+
+    async def async_load(self) -> None:
+        data = await self._store.async_load()
+        if data:
+            self.settings = {**DEFAULT_SETTINGS, **data.get("settings", {})}
+            self.locations = data.get("locations", [])
+            self.stations = data.get("stations", [])
+            self.routes = [_clean_route(r) for r in data.get("routes", [])]
+            self.car_runs = data.get("car_runs", {})
+        if not self.locations:
+            # The main location starts out as HA's home.
+            self.locations.append(
+                {
+                    "id": _new_id(),
+                    "name": self.hass.config.location_name or "Home",
+                    "latitude": self.hass.config.latitude,
+                    "longitude": self.hass.config.longitude,
+                    "main": True,
+                }
+            )
+            await self.async_save()
+
+    async def async_save(self, notify: bool = True) -> None:
+        await self._store.async_save(self.as_dict(include_runs=True))
+        if notify:
+            async_dispatcher_send(self.hass, SIGNAL_DATA_CHANGED)
+
+    def as_dict(self, include_runs: bool = False) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "settings": self.settings,
+            "locations": self.locations,
+            "stations": self.stations,
+            "routes": self.routes,
+        }
+        if include_runs:
+            data["car_runs"] = self.car_runs
+        return data
+
+    # Lookups
+
+    def location(self, location_id: str) -> dict[str, Any]:
+        return _find(self.locations, location_id, "Location")
+
+    def station(self, station_id: str) -> dict[str, Any]:
+        return _find(self.stations, station_id, "Station")
+
+    def route(self, route_id: str) -> dict[str, Any]:
+        return _find(self.routes, route_id, "Route")
+
+    def main_station(self, location_id: str) -> dict[str, Any] | None:
+        stations = [s for s in self.stations if s["location_id"] == location_id]
+        return next((s for s in stations if s["main"]), stations[0] if stations else None)
+
+    def route_station(self, route: dict[str, Any]) -> dict[str, Any]:
+        """The station a public transport route boards at."""
+        if route.get("station_id"):
+            return self.station(route["station_id"])
+        station = self.main_station(route["origin_id"])
+        if station is None:
+            location = self.location(route["origin_id"])
+            raise DataError(f"{location['name']} has no station yet")
+        return station
+
+    # Changes
+
+    async def async_update_settings(self, changes: dict[str, Any]) -> None:
+        self.settings.update(changes)
+        await self.async_save()
+
+    async def async_save_location(self, item: dict[str, Any]) -> dict[str, Any]:
+        location = _upsert(self.locations, item)
+        _keep_one_main(self.locations, location)
+        await self.async_save()
+        return location
+
+    async def async_delete_location(self, location_id: str) -> None:
+        location = self.location(location_id)
+        used = [
+            r["name"]
+            for r in self.routes
+            if location_id in (r["origin_id"], r.get("destination_id"))
+        ]
+        if used:
+            raise DataError(f"{location['name']} is used by: {', '.join(used)}")
+        self.locations.remove(location)
+        self.stations = [s for s in self.stations if s["location_id"] != location_id]
+        _keep_one_main(self.locations)
+        await self.async_save()
+
+    async def async_save_station(self, item: dict[str, Any]) -> dict[str, Any]:
+        self.location(item["location_id"])
+        station = _upsert(self.stations, item)
+        _keep_one_main(self._stations_of(station["location_id"]), station)
+        await self.async_save()
+        return station
+
+    async def async_delete_station(self, station_id: str) -> None:
+        station = self.station(station_id)
+        used = [r["name"] for r in self.routes if r.get("station_id") == station_id]
+        if used:
+            raise DataError(f"{station['name']} is used by: {', '.join(used)}")
+        self.stations.remove(station)
+        _keep_one_main(self._stations_of(station["location_id"]))
+        await self.async_save()
+
+    async def async_save_route(self, item: dict[str, Any]) -> dict[str, Any]:
+        self.location(item["origin_id"])
+        if item["mode"] == MODE_TRANSIT:
+            if not item.get("lines"):
+                raise DataError("Pick at least one line")
+            if item.get("station_id"):
+                station = self.station(item["station_id"])
+                if station["location_id"] != item["origin_id"]:
+                    raise DataError(f"{station['name']} doesn't belong to the start")
+            item = {**item, "destination_id": None}
+        elif item["mode"] == MODE_CAR:
+            if not item.get("destination_id"):
+                raise DataError("Pick a destination")
+            self.location(item["destination_id"])
+            if item["origin_id"] == item["destination_id"]:
+                raise DataError("Start and destination are the same")
+            item = {**item, "station_id": None, "lines": []}
+        else:
+            raise DataError(f"Unknown mode {item['mode']}")
+        route = _upsert(self.routes, item, has_main=False)
+        await self.async_save()
+        return route
+
+    async def async_delete_route(self, route_id: str) -> None:
+        self.routes.remove(self.route(route_id))
+        self.car_runs.pop(route_id, None)
+        await self.async_save()
+
+    def _stations_of(self, location_id: str) -> list[dict[str, Any]]:
+        return [s for s in self.stations if s["location_id"] == location_id]
+
+
+def _clean_route(route: dict[str, Any]) -> dict[str, Any]:
+    """Drop fields older versions stored: the route speaker and buffer."""
+    route = {k: v for k, v in route.items() if k not in ("speaker", "buffer_minutes")}
+    route.setdefault("lines", [])
+    if route["mode"] == MODE_TRANSIT:
+        # The ticked lines replaced the destination; until some are picked
+        # the route can't start.
+        route["destination_id"] = None
+    return route
+
+
+def _new_id() -> str:
+    return uuid.uuid4().hex[:12]
+
+
+def _find(items: list[dict[str, Any]], item_id: str, kind: str) -> dict[str, Any]:
+    for item in items:
+        if item["id"] == item_id:
+            return item
+    raise DataError(f"{kind} {item_id} not found")
+
+
+def _upsert(
+    items: list[dict[str, Any]], item: dict[str, Any], has_main: bool = True
+) -> dict[str, Any]:
+    item = dict(item)
+    if item.get("id"):
+        existing = _find(items, item["id"], "Item")
+        existing.update(item)
+        return existing
+    item["id"] = _new_id()
+    if has_main:
+        item.setdefault("main", False)
+    items.append(item)
+    return item
+
+
+def _keep_one_main(
+    items: list[dict[str, Any]], changed: dict[str, Any] | None = None
+) -> None:
+    """Exactly one item is main: the one just made main, else the first."""
+    if changed is not None and changed.get("main"):
+        for item in items:
+            item["main"] = item is changed
+    if items and not any(item.get("main") for item in items):
+        items[0]["main"] = True

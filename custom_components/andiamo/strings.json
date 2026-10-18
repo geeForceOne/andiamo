@@ -1,0 +1,28 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Andiamo",
+        "description": "Enter at least one API key. You manage locations, stations and routes later in the Andiamo sidebar page.",
+        "data": {
+          "ojp_api_key": "opentransportdata.swiss API key (public transport): the long \"Token\", not the \"Token Hash\"",
+          "tomtom_api_key": "TomTom API key (car)"
+        }
+      },
+      "reconfigure": {
+        "title": "Andiamo API keys",
+        "data": {
+          "ojp_api_key": "opentransportdata.swiss API key (public transport): the long \"Token\", not the \"Token Hash\"",
+          "tomtom_api_key": "TomTom API key (car)"
+        }
+      }
+    },
+    "error": {
+      "no_keys": "Enter at least one API key."
+    },
+    "abort": {
+      "single_instance_allowed": "Andiamo is already set up.",
+      "reconfigure_successful": "The API keys were saved."
+    }
+  }
+}

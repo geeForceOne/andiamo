@@ -1,0 +1,11 @@
+{
+  "summary": { "numResults": 2 },
+  "results": [
+    {
+      "type": "Point Address",
+      "address": { "freeformAddress": "Bahnhofstrasse 1, 8001 Zürich" },
+      "position": { "lat": 47.37174, "lon": 8.53902 }
+    },
+    { "type": "Street", "address": {} }
+  ]
+}

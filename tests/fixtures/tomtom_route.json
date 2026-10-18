@@ -1,0 +1,14 @@
+{
+  "formatVersion": "0.0.12",
+  "routes": [
+    {
+      "summary": {
+        "lengthInMeters": 32411,
+        "travelTimeInSeconds": 2460,
+        "trafficDelayInSeconds": 180,
+        "departureTime": "2026-10-19T18:19:00+02:00",
+        "arrivalTime": "2026-10-19T19:00:00+02:00"
+      }
+    }
+  ]
+}

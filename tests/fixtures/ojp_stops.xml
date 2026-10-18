@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OJP xmlns="http://www.vdv.de/ojp" xmlns:siri="http://www.siri.org.uk/siri" version="2.0">
+  <OJPResponse>
+    <siri:ServiceDelivery>
+      <OJPLocationInformationDelivery>
+        <PlaceResult>
+          <Place>
+            <StopPlace>
+              <StopPlaceRef>ch:1:sloid:7000</StopPlaceRef>
+              <StopPlaceName><Text xml:lang="de">Bern</Text></StopPlaceName>
+            </StopPlace>
+            <Name><Text xml:lang="de">Bern</Text></Name>
+            <GeoPosition>
+              <siri:Longitude>7.43913</siri:Longitude>
+              <siri:Latitude>46.94883</siri:Latitude>
+            </GeoPosition>
+          </Place>
+          <Complete>true</Complete>
+          <Probability>1</Probability>
+        </PlaceResult>
+        <PlaceResult>
+          <Place>
+            <StopPlace>
+              <StopPlaceRef>ch:1:sloid:90034</StopPlaceRef>
+              <StopPlaceName><Text xml:lang="de">Bern, Bärenpark</Text></StopPlaceName>
+            </StopPlace>
+          </Place>
+        </PlaceResult>
+      </OJPLocationInformationDelivery>
+    </siri:ServiceDelivery>
+  </OJPResponse>
+</OJP>
