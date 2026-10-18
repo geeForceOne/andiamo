@@ -2,8 +2,6 @@
 
 # Andiamo
 
-[![Open your Home Assistant instance and open Andiamo in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=geeForceOne&repository=andiamo&category=integration)
-
 **Never miss your train, bus or tram again, and stop checking the time while you get ready.**
 
 Andiamo (Italian for *"let's go!"*) is a Home Assistant integration that tells you, out loud on your speaker, exactly when to leave the house: to catch your bus, tram or train, or to arrive somewhere by car on time.
@@ -42,9 +40,22 @@ Everything is set up on one sidebar page, no YAML. Announcements are in German (
 
 ## Install
 
-**HACS:** use the button at the top, or HACS → ⋮ → Custom repositories → add `https://github.com/geeForceOne/andiamo` as *Integration*, install **Andiamo**, restart Home Assistant.
+Andiamo isn't in the default HACS list yet, so you add it to HACS as a custom repository first. It takes a minute.
 
-**By hand:** copy `custom_components/andiamo` into your `/config/custom_components/` folder and restart.
+**HACS, the quick way:** click this button. It opens HACS in your Home Assistant and asks to add Andiamo; click **Add**, then **Download**, and restart Home Assistant.
+
+[![Open your Home Assistant instance and open Andiamo in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=geeForceOne&repository=andiamo&category=integration)
+
+**HACS, by hand:**
+
+1. In Home Assistant, open **HACS**, click **⋮** (top right) → **Custom repositories**.
+2. Paste `https://github.com/geeForceOne/andiamo`, choose the type **Integration** and click **Add**.
+3. Search HACS for **Andiamo**, open it and click **Download**.
+4. Restart Home Assistant.
+
+HACS then tells you about new versions like any other integration.
+
+**Without HACS:** copy `custom_components/andiamo` into your `/config/custom_components/` folder and restart.
 
 Then: Settings → Devices & services → Add integration → **Andiamo**, and enter one or both API keys. Change the keys later with **Reconfigure** on the integration.
 
