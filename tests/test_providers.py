@@ -64,6 +64,8 @@ def test_stops() -> None:
     ]
     assert stops[0].latitude == pytest.approx(46.94883)
     assert stops[1].latitude is None
+    assert stops[0].modes == ("rail", "bus")
+    assert stops[1].modes == ()
 
 
 def test_tomtom_departure() -> None:

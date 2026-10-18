@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -42,6 +43,8 @@ async def ws(hass: HomeAssistant, hass_ws_client, transit, car, freezer):
         await hass.async_block_till_done()
         assert entry.state is ConfigEntryState.LOADED
         assert panel.call_args.kwargs["frontend_url_path"] == "andiamo"
+        # A fingerprint of the file, so browsers load every changed version.
+        assert re.fullmatch(r"/andiamo_static/andiamo-panel\.js\?v=[0-9a-f]{12}", panel.call_args.kwargs["module_url"])
 
         yield Client(client)
         await hass.config_entries.async_unload(entry.entry_id)
@@ -164,3 +167,14 @@ async def test_start_car_from_card(hass: HomeAssistant, ws, car) -> None:
 
     assert (await ws("cancel", route_id=route["id"]))["success"]
     assert runtime.runs.runs == {}
+
+
+async def test_message_templates(hass: HomeAssistant, ws) -> None:
+    state = await ws.state()
+    assert state["messages"]["de"]["go_now"] == "Los jetzt!"
+
+    ok = await ws("settings", changes={"templates": {"de": {"go_now": "Ab, {route}!"}}})
+    assert ok["success"], ok
+    typo = await ws("settings", changes={"templates": {"de": {"go_now": "Ab um {tme}!"}}})
+    assert not typo["success"]
+    assert "tme" in typo["error"]["message"]

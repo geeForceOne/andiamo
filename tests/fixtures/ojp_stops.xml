@@ -14,6 +14,9 @@
               <siri:Longitude>7.43913</siri:Longitude>
               <siri:Latitude>46.94883</siri:Latitude>
             </GeoPosition>
+            <Mode><PtMode>rail</PtMode><siri:RailSubmode>local</siri:RailSubmode></Mode>
+            <Mode><PtMode>rail</PtMode><siri:RailSubmode>interregionalRail</siri:RailSubmode></Mode>
+            <Mode><PtMode>bus</PtMode><siri:BusSubmode>localBus</siri:BusSubmode></Mode>
           </Place>
           <Complete>true</Complete>
           <Probability>1</Probability>

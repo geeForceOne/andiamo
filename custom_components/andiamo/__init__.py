@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 from pathlib import Path
 
 from homeassistant.components import frontend, panel_custom
@@ -32,7 +33,6 @@ from .store import DataError, AndiamoStore
 
 PLATFORMS = [Platform.BUTTON, Platform.SENSOR]
 FRONTEND_DIR = Path(__file__).parent / "www"
-VERSION = "0.1.0"
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -73,8 +73,15 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         [StaticPathConfig(STATIC_URL, str(FRONTEND_DIR), cache_headers=False)]
     )
     # The dashboard card is available without adding a resource by hand.
-    frontend.add_extra_js_url(hass, f"{STATIC_URL}/andiamo-card.js?v={VERSION}")
+    card_url = await hass.async_add_executor_job(_file_url, "andiamo-card.js")
+    frontend.add_extra_js_url(hass, card_url)
     return True
+
+
+def _file_url(name: str) -> str:
+    """URL with a fingerprint of the file, so browsers load every changed version."""
+    digest = hashlib.sha256((FRONTEND_DIR / name).read_bytes()).hexdigest()[:12]
+    return f"{STATIC_URL}/{name}?v={digest}"
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: AndiamoConfigEntry) -> bool:
@@ -91,9 +98,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: AndiamoConfigEntry) -> b
         hass,
         webcomponent_name=PANEL_COMPONENT,
         frontend_url_path=PANEL_URL_PATH,
-        module_url=f"{STATIC_URL}/andiamo-panel.js?v={VERSION}",
+        module_url=await hass.async_add_executor_job(_file_url, "andiamo-panel.js"),
         sidebar_title="Andiamo",
-        sidebar_icon="mdi:timer-sand",
+        sidebar_icon="mdi:clock-fast",
         require_admin=False,
     )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

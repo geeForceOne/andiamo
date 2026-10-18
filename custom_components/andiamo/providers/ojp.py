@@ -36,6 +36,7 @@ class OjpProvider(TransitProvider):
   <Restrictions>
     <Type>stop</Type>
     <NumberOfResults>10</NumberOfResults>
+    <IncludePtModes>true</IncludePtModes>
   </Restrictions>
 </OJPLocationInformationRequest>"""
         return parse_stops(await self._post(body))
@@ -100,12 +101,14 @@ def parse_stops(xml: str) -> list[Stop]:
             continue
         lon = place.findtext("o:GeoPosition/s:Longitude", namespaces=NS)
         lat = place.findtext("o:GeoPosition/s:Latitude", namespaces=NS)
+        modes = dict.fromkeys(m.text for m in place.iterfind("o:Mode/o:PtMode", NS) if m.text)
         stops.append(
             Stop(
                 ref=ref,
                 name=name,
                 latitude=float(lat) if lat else None,
                 longitude=float(lon) if lon else None,
+                modes=tuple(modes),
             )
         )
     return stops

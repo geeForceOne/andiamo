@@ -26,6 +26,7 @@ from .const import (
     SIGNAL_RUNS_CHANGED,
 )
 from .providers import lines_of
+from .texts import MESSAGES, TEXTS, unknown_placeholders
 
 if TYPE_CHECKING:
     from . import AndiamoRuntime
@@ -72,6 +73,12 @@ ROUTE = vol.Schema(
         vol.Optional("lines", default=list): [LINE],
     }
 )
+def _template(value: str) -> str:
+    if unknown := unknown_placeholders(value):
+        raise vol.Invalid(f"Unknown placeholder: {', '.join(unknown)}")
+    return value
+
+
 SETTINGS = vol.Schema(
     {
         vol.Optional("tts_entity"): _OPTIONAL_STR,
@@ -79,6 +86,7 @@ SETTINGS = vol.Schema(
         vol.Optional("language"): vol.In(LANGUAGES),
         vol.Optional("car_lead_minutes"): vol.All(vol.Coerce(int), vol.Range(min=5, max=180)),
         vol.Optional("test_mode"): bool,
+        vol.Optional("templates"): {vol.In(LANGUAGES): {vol.In(MESSAGES): vol.All(str, _template)}},
     }
 )
 
@@ -94,6 +102,7 @@ def _state(runtime: AndiamoRuntime) -> dict[str, Any]:
     return {
         **runtime.store.as_dict(),
         "runs": runtime.runs.as_list(),
+        "messages": {lang: {key: TEXTS[lang][key] for key in MESSAGES} for lang in LANGUAGES},
         "providers": {
             MODE_TRANSIT: bool(runtime.entry.data.get(CONF_OJP_KEY)),
             MODE_CAR: bool(runtime.entry.data.get(CONF_TOMTOM_KEY)),

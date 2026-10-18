@@ -114,7 +114,7 @@ class RunManager:
             return
         run.stop()
         if say and run.announced:
-            await run.say(text(run.language, "cancelled"))
+            await run.say(run.message("cancelled"))
         await self.async_forget(run)
 
     async def async_finished(self, run: Run) -> None:
@@ -168,14 +168,24 @@ class Run:
         speaker = self.manager.store.settings.get("speaker")
         await self.manager.announcer.async_say(message, self.route, speaker)
 
+    def message(self, key: str, left: int | None = None) -> str:
+        """A message with every placeholder filled, from the user's template if set."""
+        values = {
+            "route": self.route["name"],
+            "time": clock(self.leave_at) if self.leave_at else "",
+            "minutes": minutes(self.language, left) if left is not None else "",
+            **self.placeholders(),
+        }
+        templates = self.manager.store.settings.get("templates", {}).get(self.language)
+        return text(self.language, key, templates, **values)
+
+    def placeholders(self) -> dict[str, str]:
+        """Extra placeholders a kind of run can fill in."""
+        return {}
+
     def say_leave(self, key: str, now: datetime) -> str:
         assert self.leave_at is not None
-        return text(
-            self.language,
-            key,
-            time=clock(self.leave_at),
-            minutes=minutes(self.language, minutes_until(self.leave_at, now)),
-        )
+        return self.message(key, minutes_until(self.leave_at, now))
 
     def stop(self) -> None:
         self._stopped = True
@@ -218,7 +228,7 @@ class Run:
 
     async def async_go(self) -> None:
         self.stop()
-        await self.say(text(self.language, "go_now"))
+        await self.say(self.message("go_now"))
         await self.manager.async_finished(self)
 
     def _clear_timers(self) -> None:
@@ -270,12 +280,12 @@ class TransitRun(Run):
         try:
             found = await self._connections(now + self.margin)
         except ProviderError:
-            await self.say(text(self.language, "no_connection", route=self.route["name"]))
+            await self.say(self.message("no_connection"))
             raise
         # Too late for the next one: quietly take the next one we can catch.
         catchable = [c for c in found if self.leave_time(c) >= now]
         if not catchable:
-            await self.say(text(self.language, "no_connection", route=self.route["name"]))
+            await self.say(self.message("no_connection"))
             raise DataError(f"No connection found for {self.route['name']}")
         self.connection = catchable[0]
         self.leave_at = self.leave_time(self.connection)
@@ -293,11 +303,7 @@ class TransitRun(Run):
             self.at(
                 reminder,
                 lambda: self.say(
-                    text(
-                        self.language,
-                        "minutes_left",
-                        minutes=minutes(self.language, int(TRANSIT_REMINDER.total_seconds() // 60)),
-                    )
+                    self.message("minutes_left", int(TRANSIT_REMINDER.total_seconds() // 60))
                 ),
             )
         self.at(self.leave_at, self.async_go)
@@ -307,29 +313,22 @@ class TransitRun(Run):
         return TRANSIT_RECHECK
 
     async def async_recheck(self) -> None:
-        """Follow the real-time departure; switch if the connection is gone."""
+        """Follow real-time data: take whichever ticked line now leaves first.
+
+        A delay can put another ticked line ahead of the chosen one, and a
+        cancelled connection simply drops out of the list.
+        """
         assert self.connection is not None and self.leave_at is not None
         now = dt_util.utcnow()
         if self.leave_at <= now:
             return
         found = await self._connections(now)
-        same = next(
-            (
-                c
-                for c in found
-                if c.planned_departure == self.connection.planned_departure
-                and c.line_key == self.connection.line_key
-            ),
-            None,
-        )
-        if same is None:
-            catchable = [c for c in found if self.leave_time(c) >= now]
-            if not catchable:
-                self.schedule_recheck(TRANSIT_RECHECK)
-                return
-            same = catchable[0]
-        self.connection = same
-        new_leave = self.leave_time(same)
+        catchable = [c for c in found if self.leave_time(c) >= now]
+        if not catchable:
+            self.schedule_recheck(TRANSIT_RECHECK)
+            return
+        self.connection = catchable[0]
+        new_leave = self.leave_time(self.connection)
         if abs(new_leave - self.leave_at) < TRANSIT_CHANGE_THRESHOLD:
             self.schedule_recheck(TRANSIT_RECHECK)
             return
@@ -340,6 +339,15 @@ class TransitRun(Run):
             return
         await self.say(self.say_leave("changed", now))
         self._schedule(now)
+
+    def placeholders(self) -> dict[str, str]:
+        if self.connection is None:
+            return {}
+        return {
+            "line": self.connection.line,
+            "destination": self.connection.destination,
+            "departure": clock(self.connection.departure),
+        }
 
     def as_dict(self) -> dict[str, Any]:
         data = super().as_dict()
@@ -417,7 +425,7 @@ class CarRun(Run):
                 return
             self._said.add(left)
             await self.say(
-                text(self.language, "minutes_left", minutes=minutes(self.language, left))
+                self.message("minutes_left", left)
             )
 
         return say_left

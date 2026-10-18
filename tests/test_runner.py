@@ -118,6 +118,34 @@ async def test_transit_follows_delay(
     assert said()[-2:] == ["Du hast noch 2 Minuten.", "Los jetzt!"]
 
 
+async def test_transit_switches_to_earlier_line(
+    hass: HomeAssistant, runs: RunManager, routes, transit, said, clock, store: AndiamoStore
+) -> None:
+    route = await store.async_save_route(
+        {**routes["transit"], "lines": [
+            {"key": "10|Flughafen", "name": "10", "destination": "Flughafen"},
+            {"key": "2|Flughafen", "name": "2", "destination": "Flughafen"},
+        ]}
+    )
+    transit.result = [connection(12), connection(16, line="2")]
+    await runs.async_press(route["id"])
+
+    # The 10 is now 8 minutes late, so the 2 leaves first.
+    transit.result = [connection(16, line="2"), connection(12, delay=8)]
+    await go_to(hass, clock, at(1))
+    assert said()[1:] == ["Neue Zeit: Du musst um 10:11 los, das ist in 10 Minuten."]
+    assert runs.runs[route["id"]].connection.line == "2"
+
+
+async def test_transit_uses_message_template(
+    hass: HomeAssistant, runs: RunManager, routes, transit, said, store: AndiamoStore
+) -> None:
+    store.settings["templates"] = {"de": {"leave_at": "{route}: die {line} um {departure}, los um {time}."}}
+    transit.result = [connection(12)]
+    await runs.async_press(routes["transit"]["id"])
+    assert said() == ["Work: die 10 um 10:12, los um 10:07."]
+
+
 async def test_transit_small_delay_is_quiet(
     hass: HomeAssistant, runs: RunManager, routes, transit, said, clock
 ) -> None:

@@ -1,10 +1,19 @@
 {
   "domain": "andiamo",
   "name": "Andiamo",
-  "codeowners": ["@geeForceOne"],
+  "after_dependencies": [
+    "tts"
+  ],
+  "codeowners": [
+    "@geeForceOne"
+  ],
   "config_flow": true,
-  "after_dependencies": ["tts"],
-  "dependencies": ["http", "frontend", "panel_custom", "websocket_api"],
+  "dependencies": [
+    "frontend",
+    "http",
+    "panel_custom",
+    "websocket_api"
+  ],
   "documentation": "https://github.com/geeForceOne/andiamo",
   "integration_type": "service",
   "iot_class": "cloud_polling",

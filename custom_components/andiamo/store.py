@@ -26,6 +26,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "language": DEFAULT_LANGUAGE,
     "car_lead_minutes": DEFAULT_CAR_LEAD_MINUTES,
     "test_mode": False,
+    "templates": {},
+    # {"de": {"go_now": "Ab jetzt!"}}: only the messages the user replaced.
 }
 
 

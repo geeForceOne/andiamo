@@ -19,16 +19,60 @@ const T = {
   noKeyCar: "No TomTom key: car routes and address search are off.",
   keysHint: "API keys: Settings → Devices & services → Andiamo → Reconfigure.",
   deleteConfirm: "Delete {0}? Click again to confirm.", delay: "+{0} min",
-  german: "German", english: "English",
+  german: "German", english: "English", badTime: "Enter a time like {0}.",
+  messages: "Messages ({0})", messagesHint: "Leave a message empty to use the default. Placeholders:",
+  msg_leave_at: "Leave at", msg_changed: "New time", msg_traffic_changed: "Traffic changed",
+  msg_minutes_left: "Minutes left", msg_go_now: "Go now", msg_cancelled: "Cancelled", msg_no_connection: "No connection",
+};
+
+const PLACEHOLDERS = ["time", "minutes", "route", "line", "destination", "departure"];
+
+// OJP PtMode → what search results show next to a stop's name.
+const MODES = {
+  rail: "Train", intercityRail: "Train", urbanRail: "Train", tram: "Tram", bus: "Bus", trolleyBus: "Bus",
+  coach: "Coach", metro: "Metro", underground: "Metro", water: "Boat", telecabin: "Cable car", funicular: "Funicular",
+};
+const modeNames = (modes) => [...new Set((modes || []).map((m) => MODES[m] || m))].join(", ");
+
+// A route's icon follows its lines: all trams 🚋, all buses 🚌, anything else (trains, mixed) 🚆.
+const routeIcon = (lines) => {
+  const kinds = new Set((lines || []).map((l) => (l.mode === "tram" ? "tram" : ["bus", "trolleyBus", "coach"].includes(l.mode) ? "bus" : "train")));
+  return kinds.size === 1 && kinds.has("tram") ? "🚋" : kinds.size === 1 && kinds.has("bus") ? "🚌" : "🚆";
 };
 
 const esc = (v) =>
   String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
-const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+// Times follow the user's HA profile (12/24 hours, language or system), not the browser.
+let haLocale;
+const clock = (iso) => {
+  const format = haLocale?.time_format;
+  const options = { hour: "2-digit", minute: "2-digit" };
+  if (format === "12" || format === "24") options.hourCycle = format === "12" ? "h12" : "h23";
+  const language = format === "system" ? undefined : haLocale?.language;
+  return new Date(iso).toLocaleTimeString(language, options);
+};
 const minutesUntil = (iso) => Math.max(0, Math.round((new Date(iso) - Date.now()) / 60000));
 
 // "18:30" → the next 18:30 (today, or tomorrow if it has passed), as ISO.
+// What people type in "Arrive by": "18:30", "1830", "6:30 pm", "6pm" → "18:30"; anything else → null.
+const parseTime = (text) => {
+  const m = String(text).trim().toLowerCase().match(/^(\d{1,2})(?:[:.h]?(\d{2}))?\s*(am|pm|a|p)?$/);
+  if (!m) return null;
+  let h = Number(m[1]);
+  const min = Number(m[2] || 0);
+  if (m[3]) {
+    if (h < 1 || h > 12) return null;
+    h = (h % 12) + (m[3][0] === "p" ? 12 : 0);
+  }
+  if (h > 23 || min > 59) return null;
+  return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+};
+// "18:30" in the user's HA time format.
+const showTime = (hhmm) => {
+  const [h, m] = hhmm.split(":").map(Number);
+  return clock(new Date(2000, 0, 1, h, m).toISOString());
+};
 const nextTime = (hhmm) => {
   const [h, m] = hhmm.split(":").map(Number);
   const d = new Date();
@@ -57,6 +101,7 @@ class AndiamoPanel extends HTMLElement {
   set hass(hass) {
     const first = !this._hass;
     this._hass = hass;
+    haLocale = hass.locale;
     if (first) this._subscribe();
   }
 
@@ -120,12 +165,25 @@ class AndiamoPanel extends HTMLElement {
       this._drafts[key] = this._drafts[key] || {};
       this._drafts[key][name] = el.type === "checkbox" ? el.checked : el.value;
       if (e.type === "change" && el.tagName === "SELECT") this._render();
+      // Show a typed time the way HA shows times.
+      const time = el.dataset.timefield !== undefined && e.type === "change" && parseTime(el.value);
+      if (time) el.value = this._drafts[key][name] = showTime(time);
     }
     if (el.dataset.setting && e.type === "change") {
       let value = el.type === "checkbox" ? el.checked : el.value;
       if (el.type === "number") value = Number(value);
       if (value === "") value = null;
       this._ws("settings", { changes: { [el.dataset.setting]: value } });
+    }
+    if (el.dataset.template && e.type === "change") {
+      // Only replaced messages are kept; an empty one goes back to the default.
+      const lang = this._data.settings.language;
+      const templates = { ...(this._data.settings.templates || {}) };
+      const own = { ...(templates[lang] || {}) };
+      if (el.value.trim()) own[el.dataset.template] = el.value.trim();
+      else delete own[el.dataset.template];
+      templates[lang] = own;
+      this._ws("settings", { changes: { templates } }).catch(() => {});
     }
   }
 
@@ -151,8 +209,10 @@ class AndiamoPanel extends HTMLElement {
       case "press": await this._ws("press", { route_id: arg }); return;
       case "cancel-run": await this._ws("cancel", { route_id: arg }); return;
       case "start-car": {
-        const time = d[`start:${arg}`]?.time;
-        if (!time) return;
+        const typed = d[`start:${arg}`]?.time;
+        if (!typed) return;
+        const time = parseTime(typed);
+        if (!time) { this._error = this._t("badTime", showTime("18:30")); break; }
         await this._ws("start_car", { route_id: arg, arrive_at: nextTime(time) });
         delete d[`start:${arg}`];
         return;
@@ -338,7 +398,7 @@ class AndiamoPanel extends HTMLElement {
   _routeRow(r) {
     const run = this._run(r.id);
     const from = this._loc(r.origin_id)?.name;
-    const icon = r.mode === "car" ? "🚗" : "🚋";
+    const icon = r.mode === "car" ? "🚗" : routeIcon(r.lines);
     let where;
     if (r.mode === "transit") {
       const s = this._routeStation(r);
@@ -357,7 +417,7 @@ class AndiamoPanel extends HTMLElement {
       action = `<button class="primary" data-action="press" data-arg="${r.id}" ${this._data.providers.transit && r.lines?.length ? "" : "disabled"}>${this._t("start")}</button>`;
     } else {
       const key = `start:${r.id}`;
-      action = `<label class="inline">${this._t("arriveBy")} ${this._input(key, "time", `type="time" data-enter="start-car" data-arg="${r.id}"`)}</label>
+      action = `<label class="inline">${this._t("arriveBy")} ${this._input(key, "time", `type="text" class="time" data-timefield placeholder="${esc(showTime("18:30"))}" data-enter="start-car" data-arg="${r.id}"`)}</label>
         <button class="primary" data-action="start-car" data-arg="${r.id}" ${this._data.providers.car ? "" : "disabled"}>${this._t("start")}</button>`;
     }
     return `
@@ -487,7 +547,7 @@ class AndiamoPanel extends HTMLElement {
   _searchBox(key, kind) {
     const s = this._search[key];
     const results = s?.loading ? `<div class="muted">…</div>` : (s?.results || []).map(
-      (r, i) => `<button class="result" data-action="${kind === "stop" ? "pick-stop" : "pick-place"}" data-arg="${key}#${i}">${esc(r.name)}</button>`,
+      (r, i) => `<button class="result" data-action="${kind === "stop" ? "pick-stop" : "pick-place"}" data-arg="${key}#${i}">${esc(r.name)}${r.modes?.length ? ` <span class="muted">· ${esc(modeNames(r.modes))}</span>` : ""}</button>`,
     ).join("");
     return `
       <div class="search">
@@ -549,7 +609,23 @@ class AndiamoPanel extends HTMLElement {
         ${row(this._t("lead"), this._t("leadHint"), `<input type="number" min="5" max="180" step="5" data-setting="car_lead_minutes" value="${s.car_lead_minutes}"> ${this._t("min")}`)}
         ${row(this._t("testMode"), this._t("testModeHint"), `<input type="checkbox" data-setting="test_mode" ${s.test_mode ? "checked" : ""}>`)}
       </section>
+      ${this._messages(row)}
       <p class="muted">${esc(this._t("keysHint"))}</p>`;
+  }
+
+  _messages(row) {
+    const lang = this._data.settings.language;
+    const own = this._data.settings.templates?.[lang] || {};
+    const defaults = this._data.messages?.[lang] || {};
+    const rows = Object.keys(defaults).map((key) => row(this._t(`msg_${key}`), "",
+      `<input type="text" class="message" data-template="${key}" value="${esc(own[key] || "")}" placeholder="${esc(defaults[key])}">`)).join("");
+    const placeholders = PLACEHOLDERS.map((p) => `<code>{${p}}</code>`).join(" ");
+    return `
+      <section class="card messages">
+        <div class="title">${esc(this._t("messages", this._t(lang === "en" ? "english" : "german")))}</div>
+        ${rows}
+        <p class="muted">${esc(this._t("messagesHint"))} ${placeholders}</p>
+      </section>`;
   }
 }
 
@@ -601,7 +677,11 @@ const STYLE = `
   .setting:last-child { border-bottom: none; }
   .setting .control { display: flex; align-items: center; gap: 6px; }
   .setting select { min-width: 240px; }
+  input.time { width: 90px; }
   .setting input[type="number"] { width: 80px; }
+  .setting .control:has(.message) { flex: 1; min-width: 240px; }
+  .setting input.message { width: 100%; }
+  .messages .setting .label { width: 120px; flex: none; }
   .error { background: var(--error-color); color: #fff; padding: 8px 12px; border-radius: 6px; margin-bottom: 16px; }
   .hint { background: var(--secondary-background-color); padding: 8px 12px; border-radius: 6px; margin-bottom: 16px; font-size: 0.9em; }
 `;

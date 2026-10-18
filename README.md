@@ -2,14 +2,36 @@
 
 # Andiamo
 
-**Never miss your tram again, and stop checking the time while you get ready.**
+[![Open your Home Assistant instance and open Andiamo in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=geeForceOne&repository=andiamo&category=integration)
+
+**Never miss your train, bus or tram again, and stop checking the time while you get ready.**
 
 Andiamo (Italian for *"let's go!"*) is a Home Assistant integration that tells you, out loud on your speaker, exactly when to leave the house: to catch your bus, tram or train, or to arrive somewhere by car on time.
 
-- **Public transport (Switzerland):** press one button and your speaker says *"You need to leave at 10:15, that is in 7 minutes."*, then *"2 minutes left"* and *"Go now!"*. Andiamo knows how long you walk to your stop and which lines you take, follows real-time delays, and announces a new time if yours moves. Too late for the next tram? It quietly picks the one after. Press again to cancel.
+- **Public transport (Switzerland):** press one button and your speaker says *"You need to leave at 10:15, that is in 7 minutes."*, then *"2 minutes left"* and *"Go now!"*. Andiamo knows how long you walk to your stop and which lines you take, follows real-time delays, and announces a new time if yours moves. Too late for the next train, bus or tram? It quietly picks the one after. Press again to cancel.
 - **Car:** set "arrive by 19:00" on the dashboard card. From 30 minutes before you need to leave, the speaker counts down every 5 minutes (*"You have 25 minutes left"*) and ends with *"Go now!"*. Live traffic is followed all the way, so a jam on the way means an earlier "go".
 
 Everything is set up on one sidebar page, no YAML. Announcements are in German (default) or English.
+
+**Where it works:** car routes work anywhere TomTom has maps. Public transport uses Swiss data (opentransportdata.swiss), so it only covers Switzerland for now. Other free transport data providers can be added: [open an issue](https://github.com/geeForceOne/andiamo/issues) and say which one you'd like.
+
+## Screenshots
+
+**Routes:** one tap to start; a running route shows when to leave and which tram it catches.
+
+![Routes tab with a running route](docs/screenshots/routes.png)
+
+**Places and stations:** each place has its stations with the walking time; the search shows what stops there, so the train station is easy to tell from the tram stop outside.
+
+![Places tab with stations and a station search](docs/screenshots/places.png)
+
+**Settings:** speaker, language and your own announcement texts.
+
+![Settings tab with the message templates](docs/screenshots/settings.png)
+
+**Dashboard card:** start routes and set "arrive by" for the car.
+
+<img src="docs/screenshots/card.png" alt="Andiamo dashboard card" width="420">
 
 ## What you need
 
@@ -20,7 +42,7 @@ Everything is set up on one sidebar page, no YAML. Announcements are in German (
 
 ## Install
 
-**HACS:** HACS → ⋮ → Custom repositories → add `https://github.com/geeForceOne/andiamo` as *Integration*, install **Andiamo**, restart Home Assistant.
+**HACS:** use the button at the top, or HACS → ⋮ → Custom repositories → add `https://github.com/geeForceOne/andiamo` as *Integration*, install **Andiamo**, restart Home Assistant.
 
 **By hand:** copy `custom_components/andiamo` into your `/config/custom_components/` folder and restart.
 
@@ -63,3 +85,7 @@ source ~/.venvs/andiamo/bin/activate
 uv pip install -r requirements_test.txt
 bash scripts/test.sh
 ```
+
+## License
+
+[MIT](LICENSE)

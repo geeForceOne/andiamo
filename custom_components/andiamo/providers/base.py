@@ -22,6 +22,8 @@ class Stop:
     name: str
     latitude: float | None = None
     longitude: float | None = None
+    modes: tuple[str, ...] = ()
+    """What stops here (rail, tram, bus...), to tell a station from the stop outside."""
 
 
 @dataclass(frozen=True)
