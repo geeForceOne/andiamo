@@ -33,8 +33,9 @@ from .providers.ojp import OjpProvider
 from .providers.tomtom import TomTomProvider
 from .runner import RunManager
 from .store import DataError, AndiamoStore
+from .watchdog import Watchdog
 
-PLATFORMS = [Platform.BUTTON, Platform.SENSOR]
+PLATFORMS = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.SENSOR]
 FRONTEND_DIR = Path(__file__).parent / "www"
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -45,6 +46,7 @@ class AndiamoRuntime:
     store: AndiamoStore
     entry: ConfigEntry
     runs: RunManager = field(init=False)
+    watchdog: Watchdog = field(init=False)
 
     def transit(self) -> TransitProvider:
         key = self.entry.data.get(CONF_OJP_KEY)
@@ -110,6 +112,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: AndiamoConfigEntry) -> b
     runtime.runs = RunManager(
         hass, store, Announcer(hass, store), runtime.transit, runtime.car
     )
+    runtime.watchdog = Watchdog(hass, store, runtime.transit, runtime.car)
     entry.runtime_data = runtime
     hass.data[DOMAIN] = runtime
 
@@ -126,6 +129,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: AndiamoConfigEntry) -> b
     entry.async_create_background_task(
         hass, runtime.runs.async_resume(), f"{DOMAIN}_resume"
     )
+    runtime.watchdog.start()
+    entry.async_create_background_task(
+        hass, runtime.watchdog.async_check(), f"{DOMAIN}_watchdog"
+    )
     return True
 
 
@@ -133,6 +140,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: AndiamoConfigEntry) -> 
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         entry.runtime_data.runs.stop_all()
+        entry.runtime_data.watchdog.stop()
         frontend.async_remove_panel(hass, PANEL_URL_PATH)
         hass.data.pop(DOMAIN, None)
     return unloaded

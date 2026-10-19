@@ -42,7 +42,11 @@ class OjpProvider(TransitProvider):
         return parse_stops(await self._post(body))
 
     async def departures(
-        self, stop_ref: str, earliest: datetime, count: int = 100
+        self,
+        stop_ref: str,
+        earliest: datetime,
+        count: int = 100,
+        include_cancelled: bool = False,
     ) -> list[Departure]:
         body = f"""
 <OJPStopEventRequest>
@@ -59,7 +63,7 @@ class OjpProvider(TransitProvider):
     <UseRealtimeData>explanatory</UseRealtimeData>
   </Params>
 </OJPStopEventRequest>"""
-        return parse_departures(await self._post(body))
+        return parse_departures(await self._post(body), include_cancelled)
 
     async def _post(self, request: str) -> str:
         xml = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -114,13 +118,13 @@ def parse_stops(xml: str) -> list[Stop]:
     return stops
 
 
-def parse_departures(xml: str) -> list[Departure]:
-    """Departures in time order, skipping cancelled ones."""
+def parse_departures(xml: str, include_cancelled: bool = False) -> list[Departure]:
+    """Departures in time order, cancelled ones only if asked."""
     root = _parse(xml)
     departures = []
     for event in root.iterfind(".//o:StopEventResult/o:StopEvent", NS):
         departure = _departure(event)
-        if departure is not None:
+        if departure is not None and (include_cancelled or not departure.cancelled):
             departures.append(departure)
     departures.sort(key=lambda d: d.departure)
     return departures
@@ -128,7 +132,7 @@ def parse_departures(xml: str) -> list[Departure]:
 
 def _departure(event: ET.Element) -> Departure | None:
     service = event.find("o:Service", NS)
-    if service is None or service.findtext("o:Cancelled", "", NS) == "true":
+    if service is None:
         return None
     board = event.find("o:ThisCall/o:CallAtStop/o:ServiceDeparture", NS)
     if board is None:
@@ -150,6 +154,7 @@ def _departure(event: ET.Element) -> Departure | None:
         destination=destination,
         mode=service.findtext("o:Mode/o:PtMode", "", NS),
         line_key=key,
+        cancelled=service.findtext("o:Cancelled", "", NS) == "true",
     )
 
 

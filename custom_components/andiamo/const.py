@@ -20,6 +20,7 @@ STATIC_URL: Final = f"/{DOMAIN}_static"
 EVENT_ANNOUNCEMENT: Final = f"{DOMAIN}_announcement"
 SIGNAL_RUNS_CHANGED: Final = f"{DOMAIN}_runs_changed"
 SIGNAL_DATA_CHANGED: Final = f"{DOMAIN}_data_changed"
+SIGNAL_PROBLEMS_CHANGED: Final = f"{DOMAIN}_problems_changed"
 
 MODE_TRANSIT: Final = "transit"
 MODE_CAR: Final = "car"
@@ -27,6 +28,18 @@ MODE_CAR: Final = "car"
 DEFAULT_LANGUAGE: Final = "de"
 LANGUAGES: Final = ("de", "en")
 DEFAULT_CAR_LEAD_MINUTES: Final = 30
+
+# Where announcements go: said on the speaker, shown as a notification, or nowhere
+# (then only the sensor and the event carry them).
+ANNOUNCE_SPEAKER: Final = "speaker"
+ANNOUNCE_NOTIFICATION: Final = "notification"
+ANNOUNCE_OFF: Final = "off"
+ANNOUNCE_MODES: Final = (ANNOUNCE_SPEAKER, ANNOUNCE_NOTIFICATION, ANNOUNCE_OFF)
+
+# Watchdog: how often a route is checked in its time window, and the default
+# delay that counts as a problem.
+WATCH_INTERVAL: Final = timedelta(minutes=5)
+DEFAULT_PROBLEM_MINUTES: Final = 15
 
 # Public transport: fixed reminder before "go now".
 TRANSIT_REMINDER: Final = timedelta(minutes=2)

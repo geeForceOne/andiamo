@@ -14,6 +14,7 @@ from homeassistant.util import dt as dt_util
 
 from .announcer import Announcer
 from .const import (
+    ANNOUNCE_SPEAKER,
     CAR_CHANGE_THRESHOLD,
     CAR_RECHECK_FAR,
     CAR_RECHECK_NEAR,
@@ -60,6 +61,9 @@ class RunManager:
         self.transit = transit
         self.car = car
         self.runs: dict[str, Run] = {}
+        # The last announcement per route, kept after the run ends:
+        # {route_id: {"message": text, "message_at": iso}}.
+        self.messages: dict[str, dict[str, str]] = {}
 
     async def async_resume(self) -> None:
         """Pick up car countdowns that were set up before a restart."""
@@ -203,6 +207,15 @@ class Run:
         return self.manager.store.settings.get("language", "de")
 
     @property
+    def announce(self) -> str:
+        """Where announcements go: the route's choice, else the one in Settings."""
+        return (
+            self.route.get("announce")
+            or self.manager.store.settings.get("announce")
+            or ANNOUNCE_SPEAKER
+        )
+
+    @property
     def speaker(self) -> str | None:
         """This run's speaker, else the route's, else the one in Settings."""
         return (
@@ -213,7 +226,12 @@ class Run:
 
     async def say(self, message: str) -> None:
         self.announced = True
-        await self.manager.announcer.async_say(message, self.route, self.speaker)
+        self.manager.messages[self.route["id"]] = {
+            "message": message,
+            "message_at": dt_util.utcnow().isoformat(),
+        }
+        await self.manager.announcer.async_say(message, self.route, self.speaker, self.announce)
+        self.manager.changed()
 
     def message(self, key: str, left: int | None = None) -> str:
         """A message with every placeholder filled, from the user's template if set."""

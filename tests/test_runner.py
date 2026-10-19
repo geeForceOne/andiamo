@@ -363,3 +363,26 @@ async def test_arrival_rolls_a_passed_time_to_tomorrow(store) -> None:
     assert arrival(time(9, 0), date(2026, 10, 19)) == at(23 * 60)
     # Another day is taken as it is, even when it has passed.
     assert arrival(time(9, 0), date(2026, 10, 18)) == at(-25 * 60)
+
+
+async def test_last_message_stays_after_go(
+    hass: HomeAssistant, runs: RunManager, routes, transit, said, clock
+) -> None:
+    route_id = routes["transit"]["id"]
+    transit.result = [connection(12)]
+    await runs.async_press(route_id)
+    assert runs.messages[route_id]["message"] == "Du musst um 10:07 los, das ist in 7 Minuten."
+
+    await go_to(hass, clock, at(7))
+    assert runs.runs == {}
+    assert runs.messages[route_id] == {"message": "Los jetzt!", "message_at": at(7).isoformat()}
+
+
+async def test_route_announce_overrides_settings(runs: RunManager, routes, store) -> None:
+    route = routes["transit"]
+    run_route = {**route, "announce": "off"}
+    store.settings["announce"] = "speaker"
+    from custom_components.andiamo.runner import TransitRun
+
+    assert TransitRun(runs, run_route).announce == "off"
+    assert TransitRun(runs, route).announce == "speaker"

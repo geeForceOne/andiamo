@@ -8,7 +8,8 @@
 const T = {
   start: "Start", stop: "Stop", arriveBy: "Arrive by", leaveAt: "Leave at {0}", inMin: "in {0} min",
   running: "Running", noRoutes: "No routes. Add them on the Andiamo page.", delay: "+{0} min",
-  badTime: "Enter a time like {0}.", badDate: "Enter a date like {0}.", date: "Date"
+  badTime: "Enter a time like {0}.", badDate: "Enter a date like {0}.", date: "Date",
+  problem_traffic: "Traffic jam +{0} min", problem_delayed: "{1} {2} late +{0} min", problem_cancelled: "{1} {2} cancelled",
 };
 
 // A route's icon follows its lines: all trams 🚋, all buses 🚌, anything else (trains, mixed) 🚆.
@@ -241,8 +242,10 @@ class AndiamoCard extends HTMLElement {
         <input type="text" class="date" data-date="${r.id}" value="${esc(this._dates[r.id] ?? showDate(today()))}" aria-label="${this._t("date")}">
         <button class="primary" data-action="start-car" data-route="${r.id}">${this._t("start")}</button>`;
     }
+    const p = this._data.problems?.[r.id];
+    const problem = p ? `<div class="late">⚠ ${esc(this._t(`problem_${p.reason}`, p.delay_minutes, p.line || "", p.departure ? clock(p.departure) : ""))}</div>` : "";
     return `<div class="row">
-      <div class="grow"><div class="name">${r.mode === "car" ? "🚗" : routeIcon(r.lines)} ${esc(r.name)}</div>${info}</div>
+      <div class="grow"><div class="name">${r.mode === "car" ? "🚗" : routeIcon(r.lines)} ${esc(r.name)}</div>${problem}${info}</div>
       <div class="actions">${right}</div></div>`;
   }
 }

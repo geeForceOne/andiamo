@@ -51,6 +51,16 @@ class TomTomProvider(CarProvider):
         )
         return parse_trip(data)
 
+    async def trip_now(
+        self, origin: tuple[float, float], destination: tuple[float, float]
+    ) -> Trip:
+        # Without departAt TomTom leaves now, with live traffic.
+        locations = f"{origin[0]},{origin[1]}:{destination[0]},{destination[1]}"
+        data = await self._get(
+            ROUTE_URL.format(locations=locations), {"travelMode": "car", "traffic": "true"}
+        )
+        return parse_trip(data)
+
     async def search_places(self, query: str) -> list[Place]:
         params = {"limit": "8", "language": LANGUAGE_TAGS.get(self._language, "de-DE")}
         if self._bias:

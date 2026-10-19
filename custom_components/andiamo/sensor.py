@@ -70,4 +70,6 @@ class LeaveSensor(RouteEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         run = self._run() or {}
-        return {k: v for k, v in run.items() if k not in ("route_id", "leave_at")}
+        attributes = {k: v for k, v in run.items() if k not in ("route_id", "leave_at")}
+        # The last announcement stays after the run, so a display can show "go now".
+        return {**attributes, **self.runtime.runs.messages.get(self.route_id, {})}

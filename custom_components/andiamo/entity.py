@@ -22,12 +22,17 @@ class RouteEntity(Entity):
 
     _attr_should_poll = False
     key: str
+    # Added to the name, e.g. " problem".
+    suffix = ""
 
     def __init__(self, runtime: AndiamoRuntime, route: dict[str, Any]) -> None:
         self.runtime = runtime
         self.route_id = route["id"]
         self._attr_unique_id = f"{route['id']}_{self.key}"
-        self._attr_name = f"Andiamo {route['name']}"
+        self._attr_name = self.name_for(route)
+
+    def name_for(self, route: dict[str, Any]) -> str:
+        return f"Andiamo {route['name']}{self.suffix}"
 
     @property
     def route(self) -> dict[str, Any]:
@@ -35,7 +40,7 @@ class RouteEntity(Entity):
 
     @callback
     def route_changed(self) -> None:
-        self._attr_name = f"Andiamo {self.route['name']}"
+        self._attr_name = self.name_for(self.route)
         self.async_write_ha_state()
 
 
@@ -63,7 +68,7 @@ def setup_route_entities(
             if entity.entity_id and registry.async_get(entity.entity_id):
                 registry.async_remove(entity.entity_id)
         for route_id, entity in entities.items():
-            if entity.hass and entity.name != f"Andiamo {routes[route_id]['name']}":
+            if entity.hass and entity.name != entity.name_for(routes[route_id]):
                 entity.route_changed()
 
     sync()

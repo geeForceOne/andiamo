@@ -65,8 +65,8 @@ Open **Andiamo** in the sidebar.
 
 1. **Places:** your home is there already as the main place. Add more places (e.g. *Office*, *Climbing gym*) by address search or coordinates.
 2. **Stations:** under a place, search for a stop and set how many minutes you walk there. The first one is the main station; any station can be made main.
-3. **Routes:** a public transport route boards at a station (the main one unless you pick another) and takes the lines you tick, e.g. *10 → Zürich Flughafen*; the form lists the lines leaving that station. A car route goes from one place to another, e.g. *Home → Climbing gym*. Every route announces on the speaker from Settings, unless you pick another one for it.
-4. **Settings:** text-to-speech entity, speaker, language, when the car countdown starts, and **test mode** (announcements appear as notifications instead of on the speaker).
+3. **Routes:** a public transport route boards at a station (the main one unless you pick another) and takes the lines you tick, e.g. *10 → Zürich Flughafen*; the form lists the lines leaving that station. A car route goes from one place to another, e.g. *Home → Climbing gym*. Every route announces on the speaker from Settings, unless you pick another one for it. A route can also be **watched** on chosen days and times (see below).
+4. **Settings:** text-to-speech entity, speaker, language, when the car countdown starts, and **Announce on**: *Speaker*, *Notification* (good for testing) or *Off* (nothing is said; use the sensor and the event in your own automations). Each route can choose its own.
 
 ## Use
 
@@ -96,7 +96,47 @@ Open **Andiamo** in the sidebar.
         date: "2026-10-24"
         speaker: media_player.kitchen
   ```
-- Every announcement is also fired as the event `andiamo_announcement` (with `route` and `message`), e.g. to send it to your phone too.
+
+### Announcements as data
+
+- The route's sensor keeps the last announcement in its `message` attribute (with `message_at`), also after "go now", e.g. to show it on a display.
+- Every announcement is also fired as the event `andiamo_announcement`, whatever *Announce on* says:
+
+  ```yaml
+  triggers:
+    - trigger: event
+      event_type: andiamo_announcement
+  actions:
+    - action: notify.mobile_app_my_phone
+      data:
+        title: "{{ trigger.event.data.route }}"
+        message: "{{ trigger.event.data.message }}"
+  ```
+
+### Watchdog
+
+Give a route days and a time window (e.g. Monday to Friday, 06:30 to 08:00) and **Alert when late by** (default 15 minutes). In that window Andiamo checks the route every 5 minutes, even when you haven't started it, and turns on its problem sensor, e.g. `binary_sensor.andiamo_home_office_problem`:
+
+- **Car:** when the traffic delay on the way reaches the limit.
+- **Public transport:** when the next departure you can still catch on a ticked line is cancelled, or late by at least the limit.
+
+Attributes: `reason` (`traffic`, `delayed` or `cancelled`), `delay_minutes`, and for public transport `line`, `line_destination`, `departure` and `station`. Andiamo doesn't announce problems itself; react to the sensor in an automation:
+
+```yaml
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.andiamo_home_office_problem
+    to: "on"
+actions:
+  - action: notify.mobile_app_my_phone
+    data:
+      message: >-
+        {{ state_attr(trigger.entity_id, 'line') or 'Traffic' }}:
+        {{ state_attr(trigger.entity_id, 'reason') }}
+        +{{ state_attr(trigger.entity_id, 'delay_minutes') }} min
+```
+
+Each check of a car route uses one TomTom request, so a 90-minute window costs about 18 requests a day.
 
 ## Development
 

@@ -128,7 +128,8 @@ async def test_old_routes_cleaned_on_load(hass: HomeAssistant, store: AndiamoSto
     assert again.routes == [
         {"id": "r1", "name": "Old", "mode": "transit", "origin_id": home["id"],
          "destination_id": None, "station_id": None, "speaker": "media_player.x",
-         "lines": []}
+         "lines": [], "announce": None, "watch_days": [], "watch_from": None,
+         "watch_to": None, "problem_minutes": 15}
     ]
 
 
@@ -138,3 +139,29 @@ async def test_old_car_runs_load(hass: HomeAssistant, store: AndiamoStore) -> No
     again = AndiamoStore(hass)
     await again.async_load()
     assert again.car_runs == {"r1": {"arrive_at": "2026-10-19T10:00:00+00:00"}}
+
+
+async def test_test_mode_becomes_announce_notification(hass: HomeAssistant, hass_storage) -> None:
+    hass_storage["andiamo"] = {
+        "version": 1,
+        "key": "andiamo",
+        "data": {"settings": {"test_mode": True}, "locations": [], "routes": []},
+    }
+    store = AndiamoStore(hass)
+    await store.async_load()
+
+    assert store.settings["announce"] == "notification"
+    assert "test_mode" not in store.settings
+
+
+async def test_watch_needs_start_and_end(store: AndiamoStore) -> None:
+    home = store.locations[0]
+    work = await store.async_save_location({"name": "Work", "latitude": 47, "longitude": 8})
+    route = {"name": "Work", "mode": "car", "origin_id": home["id"], "destination_id": work["id"]}
+
+    with pytest.raises(DataError, match="starts and ends"):
+        await store.async_save_route({**route, "watch_days": [0], "watch_from": "06:30"})
+    saved = await store.async_save_route(
+        {**route, "watch_days": [0], "watch_from": "06:30", "watch_to": "08:00"}
+    )
+    assert saved["watch_days"] == [0]

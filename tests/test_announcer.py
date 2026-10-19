@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import pytest
-from pytest_homeassistant_custom_component.common import async_mock_service
+from pytest_homeassistant_custom_component.common import (
+    async_capture_events,
+    async_mock_service,
+)
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.andiamo import announcer as announcer_module
 from custom_components.andiamo.announcer import Announcer
+from custom_components.andiamo.const import EVENT_ANNOUNCEMENT
 from custom_components.andiamo.store import AndiamoStore
 
 ROUTE = {"id": "r1", "name": "Work"}
@@ -17,7 +21,7 @@ ROUTE = {"id": "r1", "name": "Work"}
 
 @pytest.fixture
 def speaking(store: AndiamoStore, monkeypatch) -> AndiamoStore:
-    store.settings.update(test_mode=False, tts_entity="tts.cloud", speaker="media_player.kitchen")
+    store.settings.update(tts_entity="tts.cloud", speaker="media_player.kitchen")
     languages = ["en-US", "de-DE", "de-CH", "de-AT"]
     monkeypatch.setattr(announcer_module, "engine_languages", lambda hass, entity: languages)
     return store
@@ -61,3 +65,33 @@ async def test_alexa_speaks_in_its_own_voice(hass: HomeAssistant, speaking) -> N
         "target": "media_player.echo_office",
         "data": {"type": "tts"},
     }
+
+
+async def test_off_only_fires_the_event(hass: HomeAssistant, speaking) -> None:
+    events = async_capture_events(hass, EVENT_ANNOUNCEMENT)
+    tts = async_mock_service(hass, "tts", "speak")
+
+    await Announcer(hass, speaking).async_say("Los jetzt!", ROUTE, "media_player.kitchen", "off")
+    await hass.async_block_till_done()
+
+    assert not tts
+    assert events[0].data == {"route_id": "r1", "route": "Work", "message": "Los jetzt!"}
+
+
+async def test_notification_instead_of_speaker(
+    hass: HomeAssistant, speaking, monkeypatch
+) -> None:
+    tts = async_mock_service(hass, "tts", "speak")
+    created = []
+    monkeypatch.setattr(
+        announcer_module.persistent_notification,
+        "async_create",
+        lambda hass, message, **kw: created.append(message),
+    )
+
+    await Announcer(hass, speaking).async_say(
+        "Los jetzt!", ROUTE, "media_player.kitchen", "notification"
+    )
+
+    assert not tts
+    assert created == ["Los jetzt!"]

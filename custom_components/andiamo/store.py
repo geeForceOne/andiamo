@@ -11,7 +11,10 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.storage import Store
 
 from .const import (
+    ANNOUNCE_NOTIFICATION,
+    ANNOUNCE_SPEAKER,
     DEFAULT_CAR_LEAD_MINUTES,
+    DEFAULT_PROBLEM_MINUTES,
     DEFAULT_LANGUAGE,
     MODE_CAR,
     MODE_TRANSIT,
@@ -25,7 +28,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "speaker": None,
     "language": DEFAULT_LANGUAGE,
     "car_lead_minutes": DEFAULT_CAR_LEAD_MINUTES,
-    "test_mode": False,
+    "announce": ANNOUNCE_SPEAKER,
     "templates": {},
     # {"de": {"go_now": "Ab jetzt!"}}: only the messages the user replaced.
 }
@@ -61,7 +64,7 @@ class AndiamoStore:
     async def async_load(self) -> None:
         data = await self._store.async_load()
         if data:
-            self.settings = {**DEFAULT_SETTINGS, **data.get("settings", {})}
+            self.settings = _clean_settings(data.get("settings", {}))
             self.locations = data.get("locations", [])
             self.stations = data.get("stations", [])
             self.routes = [_clean_route(r) for r in data.get("routes", [])]
@@ -193,6 +196,11 @@ class AndiamoStore:
                 self.trips.pop(item.get("id"), None)
         else:
             raise DataError(f"Unknown mode {item['mode']}")
+        if item.get("watch_days"):
+            if not item.get("watch_from") or not item.get("watch_to"):
+                raise DataError("Set when watching starts and ends")
+            if item["watch_from"] == item["watch_to"]:
+                raise DataError("Watching starts and ends at the same time")
         route = _upsert(self.routes, item, has_main=False)
         await self.async_save()
         return route
@@ -210,11 +218,25 @@ class AndiamoStore:
         return [s for s in self.stations if s["location_id"] == location_id]
 
 
+def _clean_settings(saved: dict[str, Any]) -> dict[str, Any]:
+    """Test mode became "Announce on: Notification"."""
+    settings = {**DEFAULT_SETTINGS, **saved}
+    if "announce" not in saved and settings.pop("test_mode", False):
+        settings["announce"] = ANNOUNCE_NOTIFICATION
+    settings.pop("test_mode", None)
+    return settings
+
+
 def _clean_route(route: dict[str, Any]) -> dict[str, Any]:
     """Drop the buffer older versions stored; fill in fields added since."""
     route = {k: v for k, v in route.items() if k != "buffer_minutes"}
     route.setdefault("lines", [])
     route.setdefault("speaker", None)
+    route.setdefault("announce", None)
+    route.setdefault("watch_days", [])
+    route.setdefault("watch_from", None)
+    route.setdefault("watch_to", None)
+    route.setdefault("problem_minutes", DEFAULT_PROBLEM_MINUTES)
     if route["mode"] == MODE_TRANSIT:
         # The ticked lines replaced the destination; until some are picked
         # the route can't start.

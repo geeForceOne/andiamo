@@ -38,6 +38,7 @@ class Departure:
     mode: str
     line_key: str
     """Identifies the line and its direction, to match the lines a route takes."""
+    cancelled: bool = False
 
     @property
     def delay(self) -> timedelta:
@@ -82,9 +83,13 @@ class TransitProvider(ABC):
 
     @abstractmethod
     async def departures(
-        self, stop_ref: str, earliest: datetime, count: int = 100
+        self,
+        stop_ref: str,
+        earliest: datetime,
+        count: int = 100,
+        include_cancelled: bool = False,
     ) -> list[Departure]:
-        """Departures from the stop at `earliest` or later, cancelled ones left out."""
+        """Departures from the stop at `earliest` or later, cancelled ones left out unless asked."""
 
 
 class CarProvider(ABC):
@@ -98,6 +103,12 @@ class CarProvider(ABC):
         arrive_at: datetime,
     ) -> Trip:
         """The trip from `origin` that reaches `destination` by `arrive_at`."""
+
+    @abstractmethod
+    async def trip_now(
+        self, origin: tuple[float, float], destination: tuple[float, float]
+    ) -> Trip:
+        """The trip from `origin` to `destination` leaving now, in today's traffic."""
 
     @abstractmethod
     async def search_places(self, query: str) -> list[Place]:

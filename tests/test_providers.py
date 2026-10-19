@@ -86,3 +86,11 @@ def test_tomtom_places_skip_incomplete() -> None:
     assert len(places) == 1
     assert places[0].name == "Bahnhofstrasse 1, 8001 Zürich"
     assert (places[0].latitude, places[0].longitude) == (47.37174, 8.53902)
+
+
+def test_cancelled_departures_on_request() -> None:
+    departures = parse_departures(fixture("ojp_stop_events.xml"), include_cancelled=True)
+
+    cancelled = [d for d in departures if d.cancelled]
+    assert len(cancelled) == 1
+    assert len(departures) == 5

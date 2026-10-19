@@ -13,7 +13,12 @@ const T = {
   latitude: "Latitude", longitude: "Longitude", useHome: "Use HA home",
   tts: "Text-to-speech", language: "Announcement language", none: "None", min: "min",
   lead: "Car countdown starts", leadHint: "Minutes before leaving",
-  testMode: "Test mode", testModeHint: "Notifications instead of the speaker",
+  announceOn: "Announce on", announceHint: "Off: only the sensor and the andiamo_announcement event",
+  announce_speaker: "Speaker", announce_notification: "Notification", announce_off: "Off",
+  watch: "Watch", watchFrom: "Watch from", watchTo: "Watch until", problemAt: "Alert when late by (min)",
+  watchHint: "On these days and times, the problem sensor turns on for traffic jams, delays or cancellations.",
+  days: "Mo,Tu,We,Th,Fr,Sa,Su", watching: "Watching",
+  problem_traffic: "Traffic jam +{0} min", problem_delayed: "{1} {2} late +{0} min", problem_cancelled: "{1} {2} cancelled",
   noRoutes: "No routes yet.", noStations: "No stations yet.", running: "Running",
   noKeyTransit: "No opentransportdata.swiss key: public transport is off.",
   noKeyCar: "No TomTom key: car routes and address search are off.",
@@ -27,6 +32,7 @@ const T = {
 };
 
 const PLACEHOLDERS = ["time", "minutes", "route", "line", "destination", "departure"];
+const ANNOUNCE = ["speaker", "notification", "off"];
 
 // OJP PtMode → what search results show next to a stop's name.
 const MODES = {
@@ -284,6 +290,13 @@ class AndiamoPanel extends HTMLElement {
         r.lines = ticked ? r.lines.filter((l) => l.key !== line.key) : [...(r.lines || []), line];
         break;
       }
+      case "toggle-day": {
+        const [key, day] = arg.split("#");
+        const days = new Set(d[key].watch_days || []);
+        days.has(Number(day)) ? days.delete(Number(day)) : days.add(Number(day));
+        d[key].watch_days = [...days].sort();
+        break;
+      }
       case "save-loc": await this._saveLoc(arg); break;
       case "save-station": await this._saveStation(arg); break;
       case "main-loc": await this._ws("location/save", { item: { ...this._loc(arg), main: true } }); return;
@@ -327,10 +340,16 @@ class AndiamoPanel extends HTMLElement {
   _draftFor(key) {
     const [kind, id, extra] = key.split(":");
     if (kind === "route") {
-      if (id !== "new") return { ...this._data.routes.find((r) => r.id === id) };
+      if (id !== "new") {
+        const r = { ...this._data.routes.find((x) => x.id === id) };
+        // Watch times show the way HA shows times.
+        for (const f of ["watch_from", "watch_to"]) r[f] = r[f] ? showTime(r[f]) : "";
+        return r;
+      }
       const main = this._data.locations.find((l) => l.main);
       const other = this._data.locations.find((l) => !l.main);
-      return { mode: this._data.providers.transit ? "transit" : "car", origin_id: main?.id, destination_id: other?.id, lines: [] };
+      return { mode: this._data.providers.transit ? "transit" : "car", origin_id: main?.id, destination_id: other?.id, lines: [],
+        watch_days: [], problem_minutes: 15 };
     }
     if (kind === "loc") return id === "new" ? {} : { ...this._loc(id) };
     if (kind === "station") {
@@ -363,7 +382,15 @@ class AndiamoPanel extends HTMLElement {
       station_id: transit ? r.station_id || null : null,
       lines: transit ? r.lines || [] : [],
       speaker: r.speaker || null,
+      announce: r.announce || null,
+      watch_days: r.watch_days || [],
+      problem_minutes: Number(r.problem_minutes || 15),
     };
+    for (const f of ["watch_from", "watch_to"]) {
+      const typed = (r[f] || "").trim();
+      item[f] = typed ? parseTime(typed) : null;
+      if (typed && !item[f]) { this._error = this._t("badTime", showTime("06:30")); return; }
+    }
     if (r.id) item.id = r.id;
     await this._ws("route/save", { item });
     delete this._drafts[key];
@@ -483,11 +510,15 @@ class AndiamoPanel extends HTMLElement {
         <input data-draft="${key}|date" value="${esc(date)}" type="text" class="date" data-datefield data-enter="start-car" data-arg="${r.id}" aria-label="${this._t("date")}">
         <button class="primary" data-action="start-car" data-arg="${r.id}" ${this._data.providers.car ? "" : "disabled"}>${this._t("start")}</button>`;
     }
+    const problem = this._data.problems?.[r.id];
+    const watch = problem ? `<div class="late">⚠ ${esc(this._problemText(problem))}</div>`
+      : this._data.watching?.includes(r.id) ? `<div class="muted">👁 ${this._t("watching")}</div>` : "";
     return `
       <div class="row ${run ? "active" : ""}">
         <div class="grow clickable" data-action="open" data-arg="route:${r.id}" title="${this._t("edit")}">
           <div class="title">${icon} ${esc(r.name)}</div>
           ${where ? `<div class="muted">${where}</div>` : ""}
+          ${watch}
         </div>
         <div class="actions">${action}${this._deleteBtn(`route:${r.id}`, r.name)}</div>
       </div>`;
@@ -511,6 +542,19 @@ class AndiamoPanel extends HTMLElement {
     const fallback = settings ? this._hass.states[settings]?.attributes.friendly_name || settings : this._t("none");
     const speakers = [["", this._t("defaultSpeaker", fallback)], ...this._entities("media_player")];
     fields += `<label>${this._t("speaker")} ${this._select(key, "speaker", speakers)}</label>`;
+    const announceDefault = this._t(`announce_${this._data.settings.announce || "speaker"}`);
+    fields += `<label>${this._t("announceOn")} ${this._select(key, "announce",
+      [["", this._t("defaultSpeaker", announceDefault)], ...ANNOUNCE.map((a) => [a, this._t(`announce_${a}`)])])}</label>`;
+    const days = new Set(r.watch_days || []);
+    const dayChecks = this._t("days").split(",").map((name, i) => `
+      <label class="check"><input type="checkbox" data-action="toggle-day" data-arg="${esc(key)}#${i}" ${days.has(i) ? "checked" : ""}> ${name}</label>`).join("");
+    const placeholder = (t) => `type="text" class="time" data-timefield placeholder="${esc(showTime(t))}"`;
+    fields += `
+      <div class="wide"><div class="muted">${this._t("watch")}</div><div class="days">${dayChecks}</div>
+        <div class="muted">${this._t("watchHint")}</div></div>
+      <label>${this._t("watchFrom")} ${this._input(key, "watch_from", placeholder("06:30"))}</label>
+      <label>${this._t("watchTo")} ${this._input(key, "watch_to", placeholder("08:00"))}</label>
+      <label>${this._t("problemAt")} ${this._input(key, "problem_minutes", 'type="number" min="1" max="180"')}</label>`;
     const ready = !transit || r.lines?.length;
     return `
       <div class="form">
@@ -523,6 +567,10 @@ class AndiamoPanel extends HTMLElement {
           <button data-action="close" data-arg="${key}">${this._t("cancel")}</button>
         </div>
       </div>`;
+  }
+
+  _problemText(p) {
+    return this._t(`problem_${p.reason}`, p.delay_minutes, p.line || "", p.departure ? clock(p.departure) : "");
   }
 
   _routeStation(r) {
@@ -674,7 +722,8 @@ class AndiamoPanel extends HTMLElement {
           <option value="en" ${s.language === "en" ? "selected" : ""}>${this._t("english")}</option>
         </select>`)}
         ${row(this._t("lead"), this._t("leadHint"), `<input type="number" min="5" max="180" step="5" data-setting="car_lead_minutes" value="${s.car_lead_minutes}"> ${this._t("min")}`)}
-        ${row(this._t("testMode"), this._t("testModeHint"), `<input type="checkbox" data-setting="test_mode" ${s.test_mode ? "checked" : ""}>`)}
+        ${row(this._t("announceOn"), this._t("announceHint"), `<select data-setting="announce">${ANNOUNCE
+          .map((a) => `<option value="${a}" ${a === s.announce ? "selected" : ""}>${this._t(`announce_${a}`)}</option>`).join("")}</select>`)}
       </section>
       ${this._messages(row)}
       <p class="muted">${esc(this._t("keysHint"))}</p>`;
@@ -735,6 +784,7 @@ const STYLE = `
   .wide, .buttons { grid-column: 1 / -1; }
   .lines { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 12px; margin-top: 6px; }
   .buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+  .days { display: flex; gap: 4px 14px; flex-wrap: wrap; margin: 6px 0; }
   .search { display: flex; gap: 8px; }
   .search input { flex: 1; }
   .results { display: flex; flex-direction: column; margin-top: 4px; }

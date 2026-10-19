@@ -236,3 +236,55 @@ async def test_start_action_time_is_for_cars(hass: HomeAssistant, ws, transit) -
         await hass.services.async_call(
             DOMAIN, "start", {"time": "12:00"}, target={"entity_id": sensor}, blocking=True
         )
+
+
+async def test_watchdog_problem_sensor(hass: HomeAssistant, ws, car) -> None:
+    home = (await ws.state())["locations"][0]["id"]
+    gf = (await ws("location/save", item={"name": "GF", "latitude": 47.2, "longitude": 8.3}))["result"]
+    car.now = (3000, 20 * 60)
+    # Monday 10:00 in Zurich is inside 9:00–11:00.
+    route = (await ws(
+        "route/save",
+        item={
+            "name": "GF", "mode": "car", "origin_id": home, "destination_id": gf["id"],
+            "watch_days": [0], "watch_from": "9:00", "watch_to": "11:00", "problem_minutes": 15,
+        },
+    ))["result"]
+    assert route["watch_from"] == "09:00"
+    await hass.async_block_till_done()
+
+    entity_id = er.async_get(hass).async_get_entity_id("binary_sensor", DOMAIN, f"{route['id']}_problem")
+    state = hass.states.get(entity_id)
+    assert state.state == "on"
+    assert state.name == "Andiamo GF problem"
+    assert state.attributes["reason"] == "traffic"
+    assert state.attributes["delay_minutes"] == 20
+    assert (await ws.state())["problems"][route["id"]]["reason"] == "traffic"
+
+    # Watching switched off: the problem goes with it.
+    await ws("route/save", item={**route, "watch_days": []})
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id).state == "off"
+
+
+async def test_announce_setting_and_message_attribute(hass: HomeAssistant, ws, transit) -> None:
+    assert (await ws("settings", changes={"announce": "off"}))["success"]
+    assert not (await ws("settings", changes={"announce": "loud"}))["success"]
+    home = (await ws.state())["locations"][0]["id"]
+    station = (await ws(
+        "station/save", item={"location_id": home, "name": "Tram", "stop_ref": "x", "walk_minutes": 5}
+    ))["result"]
+    line = {"key": "10|Flughafen", "name": "10", "destination": "Flughafen"}
+    route = (await ws(
+        "route/save", item={"name": "Tram", "mode": "transit", "origin_id": home, "lines": [line]}
+    ))["result"]
+    await hass.async_block_till_done()
+    transit.result = [
+        Departure(at(12), at(12), "10", "Flughafen", "tram", "10|Flughafen"),
+    ]
+
+    assert (await ws("press", route_id=route["id"]))["success"]
+    await hass.async_block_till_done()
+    sensor = er.async_get(hass).async_get_entity_id("sensor", DOMAIN, f"{route['id']}_leave")
+    assert hass.states.get(sensor).attributes["message"].startswith("Du musst um 10:07 los")
+    assert not hass.states.async_all("persistent_notification")

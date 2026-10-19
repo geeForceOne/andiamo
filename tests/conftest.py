@@ -43,20 +43,29 @@ class FakeTransit(TransitProvider):
     async def search_stops(self, query: str) -> list[Stop]:
         return [Stop("ch:1:sloid:1", query)]
 
-    async def departures(self, stop_ref, earliest, count=100):
+    async def departures(self, stop_ref, earliest, count=100, include_cancelled=False):
         self.calls.append(earliest)
-        return [d for d in self.result if d.departure >= earliest]
+        return [
+            d
+            for d in self.result
+            if d.departure >= earliest and (include_cancelled or not d.cancelled)
+        ]
 
 
 class FakeCar(CarProvider):
     def __init__(self) -> None:
         self.departure: datetime | None = None
         self.calls = 0
+        # Leaving now: (travel seconds, traffic delay seconds).
+        self.now = (1800, 0)
 
     async def trip_for_arrival(self, origin, destination, arrive_at):
         self.calls += 1
         assert self.departure is not None
         return Trip(self.departure, 2460, 180, 32411)
+
+    async def trip_now(self, origin, destination):
+        return Trip(datetime.now(), self.now[0], self.now[1], 32411)
 
     async def search_places(self, query: str) -> list[Place]:
         return [Place(query, 47.0, 8.0)]
@@ -77,7 +86,7 @@ async def store(hass: HomeAssistant) -> AndiamoStore:
     await hass.config.async_set_time_zone("Europe/Zurich")
     store = AndiamoStore(hass)
     await store.async_load()
-    store.settings["test_mode"] = True
+    store.settings["announce"] = "notification"
     return store
 
 

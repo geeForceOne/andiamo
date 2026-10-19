@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict
+from datetime import datetime
 from functools import wraps
 from typing import TYPE_CHECKING, Any
 
@@ -16,13 +17,16 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    ANNOUNCE_MODES,
     CONF_OJP_KEY,
     CONF_TOMTOM_KEY,
+    DEFAULT_PROBLEM_MINUTES,
     DOMAIN,
     LANGUAGES,
     MODE_CAR,
     MODE_TRANSIT,
     SIGNAL_DATA_CHANGED,
+    SIGNAL_PROBLEMS_CHANGED,
     SIGNAL_RUNS_CHANGED,
 )
 from .providers import lines_of
@@ -34,6 +38,14 @@ if TYPE_CHECKING:
 Handler = Callable[[HomeAssistant, "AndiamoRuntime", dict[str, Any]], Awaitable[Any]]
 
 _OPTIONAL_STR = vol.Any(None, str)
+
+def _hhmm(value: str) -> str:
+    """A time of day as "HH:MM"."""
+    try:
+        return datetime.strptime(value, "%H:%M").strftime("%H:%M")
+    except (TypeError, ValueError) as err:
+        raise vol.Invalid(f"Unreadable time {value}") from err
+
 
 LOCATION = vol.Schema(
     {
@@ -72,6 +84,15 @@ ROUTE = vol.Schema(
         vol.Optional("station_id", default=None): _OPTIONAL_STR,
         vol.Optional("lines", default=list): [LINE],
         vol.Optional("speaker", default=None): _OPTIONAL_STR,
+        vol.Optional("announce", default=None): vol.Any(None, vol.In(ANNOUNCE_MODES)),
+        vol.Optional("watch_days", default=list): vol.All(
+            [vol.All(vol.Coerce(int), vol.Range(min=0, max=6))], lambda days: sorted(set(days))
+        ),
+        vol.Optional("watch_from", default=None): vol.Any(None, _hhmm),
+        vol.Optional("watch_to", default=None): vol.Any(None, _hhmm),
+        vol.Optional("problem_minutes", default=DEFAULT_PROBLEM_MINUTES): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=180)
+        ),
     }
 )
 def _template(value: str) -> str:
@@ -86,7 +107,7 @@ SETTINGS = vol.Schema(
         vol.Optional("speaker"): _OPTIONAL_STR,
         vol.Optional("language"): vol.In(LANGUAGES),
         vol.Optional("car_lead_minutes"): vol.All(vol.Coerce(int), vol.Range(min=5, max=180)),
-        vol.Optional("test_mode"): bool,
+        vol.Optional("announce"): vol.In(ANNOUNCE_MODES),
         vol.Optional("templates"): {vol.In(LANGUAGES): {vol.In(MESSAGES): vol.All(str, _template)}},
     }
 )
@@ -103,6 +124,7 @@ def _state(runtime: AndiamoRuntime) -> dict[str, Any]:
     return {
         **runtime.store.as_dict(),
         "runs": runtime.runs.as_list(),
+        **runtime.watchdog.as_dict(),
         "messages": {lang: {key: TEXTS[lang][key] for key in MESSAGES} for lang in LANGUAGES},
         "providers": {
             MODE_TRANSIT: bool(runtime.entry.data.get(CONF_OJP_KEY)),
@@ -175,6 +197,7 @@ def ws_subscribe(
     unsubs = [
         async_dispatcher_connect(hass, SIGNAL_DATA_CHANGED, send),
         async_dispatcher_connect(hass, SIGNAL_RUNS_CHANGED, send),
+        async_dispatcher_connect(hass, SIGNAL_PROBLEMS_CHANGED, send),
     ]
 
     @callback
