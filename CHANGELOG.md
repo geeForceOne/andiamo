@@ -1,10 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-10-19
 
 ### New
 
-- Watchdog: a route can be watched on chosen days and times. Its new problem sensor turns on when traffic, a delay or a cancellation crosses the route's limit (default 15 minutes), so automations can react.
+- A route can be watched on chosen days and times. Its new problem sensor turns on when traffic, a delay or a cancellation reaches the route's "Alert when late by" limit (default 15 minutes).
 - "Announce on" (Speaker, Notification or Off) replaces test mode; each route can choose its own. Test mode turned on becomes Notification.
 - The leave-at sensor keeps the last announcement in its `message` attribute, also after "go now".
 

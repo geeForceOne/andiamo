@@ -15,19 +15,19 @@ Everything is set up on one sidebar page, no YAML. Announcements are in German (
 
 ## Screenshots
 
-**Routes:** one tap to start; a running route shows when to leave and which tram it catches.
+**Routes:** one tap to start. The watchdog flags a cancelled tram; the open car route is watched on weekday evenings and alerts from 10 minutes of traffic.
 
-![Routes tab with a running route](docs/screenshots/routes.png)
+![Routes tab with a watchdog problem and a route form with watch times](docs/screenshots/routes.png)
 
 **Places and stations:** each place has its stations with the walking time; the search shows what stops there, so the train station is easy to tell from the tram stop outside.
 
 ![Places tab with stations and a station search](docs/screenshots/places.png)
 
-**Settings:** speaker, language and your own announcement texts.
+**Settings:** speaker, language, where announcements go, and your own announcement texts.
 
 ![Settings tab with the message templates](docs/screenshots/settings.png)
 
-**Dashboard card:** start routes and set "arrive by" for the car.
+**Dashboard card:** start routes, set "arrive by" for the car, and see watchdog problems.
 
 <img src="docs/screenshots/card.png" alt="Andiamo dashboard card" width="420">
 
