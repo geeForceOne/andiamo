@@ -3,6 +3,9 @@
     "start": {
       "service": "mdi:play"
     },
+    "check": {
+      "service": "mdi:car-clock"
+    },
     "stop": {
       "service": "mdi:stop"
     }

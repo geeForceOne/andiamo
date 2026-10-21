@@ -5,16 +5,18 @@ from __future__ import annotations
 from typing import Any
 import uuid
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.storage import Store
 
+from . import windows
 from .const import (
     ANNOUNCE_NOTIFICATION,
     ANNOUNCE_SPEAKER,
     DEFAULT_CAR_LEAD_MINUTES,
-    DEFAULT_PROBLEM_MINUTES,
+    DEFAULT_LIMIT_OJP,
+    DEFAULT_LIMIT_TOMTOM,
     DEFAULT_LANGUAGE,
     MODE_CAR,
     MODE_TRANSIT,
@@ -31,6 +33,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "announce": ANNOUNCE_SPEAKER,
     "templates": {},
     # {"de": {"go_now": "Ab jetzt!"}}: only the messages the user replaced.
+    "limit_tomtom": DEFAULT_LIMIT_TOMTOM,
+    "limit_ojp": DEFAULT_LIMIT_OJP,
 }
 
 
@@ -60,6 +64,8 @@ class AndiamoStore:
         self.car_runs: dict[str, dict[str, Any]] = {}
         # The last car trip planned per route, to show the drive time.
         self.trips: dict[str, dict[str, int]] = {}
+        # API calls made today (UTC): {"day": "2026-10-20", "tomtom": 12, "ojp": 340}.
+        self.usage: dict[str, Any] = {}
 
     async def async_load(self) -> None:
         data = await self._store.async_load()
@@ -73,6 +79,7 @@ class AndiamoStore:
                 for route_id, run in data.get("car_runs", {}).items()
             }
             self.trips = data.get("trips", {})
+            self.usage = data.get("usage", {})
         if not self.locations:
             # The main location starts out as HA's home.
             self.locations.append(
@@ -85,6 +92,11 @@ class AndiamoStore:
                 }
             )
             await self.async_save()
+
+    @callback
+    def delay_save(self) -> None:
+        """Save a little later, e.g. after counting an API call."""
+        self._store.async_delay_save(lambda: self.as_dict(include_runs=True), 30)
 
     async def async_save(self, notify: bool = True) -> None:
         await self._store.async_save(self.as_dict(include_runs=True))
@@ -101,6 +113,7 @@ class AndiamoStore:
         }
         if include_runs:
             data["car_runs"] = self.car_runs
+            data["usage"] = self.usage
         return data
 
     # Lookups
@@ -186,7 +199,8 @@ class AndiamoStore:
             self.location(item["destination_id"])
             if item["origin_id"] == item["destination_id"]:
                 raise DataError("Start and destination are the same")
-            item = {**item, "station_id": None, "lines": []}
+            # Departure sensors are for public transport only.
+            item = {**item, "station_id": None, "lines": [], "departure_windows": []}
             old = self._old_route(item)
             if (old.get("origin_id"), old.get("destination_id")) != (
                 item["origin_id"],
@@ -196,11 +210,11 @@ class AndiamoStore:
                 self.trips.pop(item.get("id"), None)
         else:
             raise DataError(f"Unknown mode {item['mode']}")
-        if item.get("watch_days"):
-            if not item.get("watch_from") or not item.get("watch_to"):
-                raise DataError("Set when watching starts and ends")
-            if item["watch_from"] == item["watch_to"]:
-                raise DataError("Watching starts and ends at the same time")
+        try:
+            windows.check(item.get("watch_windows") or [], "watch")
+            windows.check(item.get("departure_windows") or [], "departure sensor")
+        except ValueError as err:
+            raise DataError(str(err)) from err
         route = _upsert(self.routes, item, has_main=False)
         await self.async_save()
         return route
@@ -228,15 +242,19 @@ def _clean_settings(saved: dict[str, Any]) -> dict[str, Any]:
 
 
 def _clean_route(route: dict[str, Any]) -> dict[str, Any]:
-    """Drop the buffer older versions stored; fill in fields added since."""
+    """Drop the buffer older versions stored; fill in fields added since; one window became a list."""
     route = {k: v for k, v in route.items() if k != "buffer_minutes"}
     route.setdefault("lines", [])
     route.setdefault("speaker", None)
     route.setdefault("announce", None)
-    route.setdefault("watch_days", [])
-    route.setdefault("watch_from", None)
-    route.setdefault("watch_to", None)
-    route.setdefault("problem_minutes", DEFAULT_PROBLEM_MINUTES)
+    if "watch_windows" not in route:
+        route["watch_windows"] = windows.migrate(
+            route, "watch", {"problem_minutes": "problem_minutes"}
+        )
+    if "departure_windows" not in route:
+        route["departure_windows"] = windows.migrate(
+            route, "departures", {"departures_every": "every", "departures_count": "count"}
+        )
     if route["mode"] == MODE_TRANSIT:
         # The ticked lines replaced the destination; until some are picked
         # the route can't start.

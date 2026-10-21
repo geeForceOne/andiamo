@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -74,7 +75,17 @@ class Place:
     longitude: float
 
 
-class TransitProvider(ABC):
+class Counted:
+    """A provider that reports each API call, for the usage line in the panel."""
+
+    on_call: Callable[[], None] | None = None
+
+    def counted(self) -> None:
+        if self.on_call is not None:
+            self.on_call()
+
+
+class TransitProvider(Counted, ABC):
     """Finds stops and the next departures from a stop."""
 
     @abstractmethod
@@ -92,7 +103,7 @@ class TransitProvider(ABC):
         """Departures from the stop at `earliest` or later, cancelled ones left out unless asked."""
 
 
-class CarProvider(ABC):
+class CarProvider(Counted, ABC):
     """Works out when to leave by car to arrive on time."""
 
     @abstractmethod

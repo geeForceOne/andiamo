@@ -13,7 +13,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, SupportsResponse
 from homeassistant.helpers import config_validation as cv, service
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
@@ -33,6 +33,8 @@ from .providers.ojp import OjpProvider
 from .providers.tomtom import TomTomProvider
 from .runner import RunManager
 from .store import DataError, AndiamoStore
+from .timetable import Departures, Timetable
+from .usage import Usage
 from .watchdog import Watchdog
 
 PLATFORMS = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.SENSOR]
@@ -47,25 +49,32 @@ class AndiamoRuntime:
     entry: ConfigEntry
     runs: RunManager = field(init=False)
     watchdog: Watchdog = field(init=False)
+    timetable: Timetable = field(init=False)
+    usage: Usage = field(init=False)
+    departures: Departures = field(init=False)
 
     def transit(self) -> TransitProvider:
         key = self.entry.data.get(CONF_OJP_KEY)
         if not key:
             raise DataError("No opentransportdata.swiss API key set")
         session = async_get_clientsession(self.store.hass)
-        return OjpProvider(session, key, self.store.settings.get("language", "de"))
+        provider = OjpProvider(session, key, self.store.settings.get("language", "de"))
+        provider.on_call = lambda: self.usage.count("ojp")
+        return provider
 
     def car(self) -> CarProvider:
         key = self.entry.data.get(CONF_TOMTOM_KEY)
         if not key:
             raise DataError("No TomTom API key set")
         hass = self.store.hass
-        return TomTomProvider(
+        provider = TomTomProvider(
             async_get_clientsession(hass),
             key,
             self.store.settings.get("language", "de"),
             bias=(hass.config.latitude, hass.config.longitude),
         )
+        provider.on_call = lambda: self.usage.count("tomtom")
+        return provider
 
 
 type AndiamoConfigEntry = ConfigEntry[AndiamoRuntime]
@@ -86,6 +95,15 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             vol.Optional("speaker"): cv.entity_domain("media_player"),
         },
         func="async_start_route",
+    )
+    service.async_register_platform_entity_service(
+        hass,
+        DOMAIN,
+        "check",
+        entity_domain=SENSOR_DOMAIN,
+        schema={vol.Optional("speaker"): cv.entity_domain("media_player")},
+        func="async_check_route",
+        supports_response=SupportsResponse.OPTIONAL,
     )
     service.async_register_platform_entity_service(
         hass, DOMAIN, "stop", entity_domain=SENSOR_DOMAIN, schema=None, func="async_stop_route"
@@ -113,6 +131,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: AndiamoConfigEntry) -> b
         hass, store, Announcer(hass, store), runtime.transit, runtime.car
     )
     runtime.watchdog = Watchdog(hass, store, runtime.transit, runtime.car)
+    runtime.usage = Usage(hass, store)
+    runtime.timetable = Timetable(store, runtime.transit)
+    runtime.departures = Departures(hass, store, runtime.timetable)
     entry.runtime_data = runtime
     hass.data[DOMAIN] = runtime
 
@@ -130,6 +151,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: AndiamoConfigEntry) -> b
         hass, runtime.runs.async_resume(), f"{DOMAIN}_resume"
     )
     runtime.watchdog.start()
+    runtime.departures.start()
     entry.async_create_background_task(
         hass, runtime.watchdog.async_check(), f"{DOMAIN}_watchdog"
     )
@@ -141,6 +163,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: AndiamoConfigEntry) -> 
     if unloaded:
         entry.runtime_data.runs.stop_all()
         entry.runtime_data.watchdog.stop()
+        entry.runtime_data.departures.stop()
+        entry.runtime_data.usage.stop()
         frontend.async_remove_panel(hass, PANEL_URL_PATH)
         hass.data.pop(DOMAIN, None)
     return unloaded

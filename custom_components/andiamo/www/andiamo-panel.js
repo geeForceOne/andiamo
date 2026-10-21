@@ -8,14 +8,21 @@ const T = {
   station: "Station", mainStation: "Main station", speaker: "Speaker",
   lines: "Lines", pickLine: "Pick a line", loadingLines: "Loading lines…", noLines: "No departures found from this station.",
   walk: "Walk (min)", save: "Save", cancel: "Cancel", delete: "Delete", edit: "Edit",
-  start: "Start", stop: "Stop", arriveBy: "Arrive by", leaveAt: "Leave at {0}", inMin: "in {0} min",
+  start: "Start", stop: "Stop", checkHint: "Drive time and traffic right now", arriveBy: "Arrive by", leaveAt: "Leave at {0}", inMin: "in {0}",
   main: "Main", makeMain: "Make main", search: "Search", searchStop: "Search a stop…", searchAddress: "Search an address…",
   latitude: "Latitude", longitude: "Longitude", useHome: "Use HA home",
   tts: "Text-to-speech", language: "Announcement language", none: "None", min: "min",
   lead: "Car countdown starts", leadHint: "Minutes before leaving",
   announceOn: "Announce on", announceHint: "Off: only the sensor and the andiamo_announcement event",
   announce_speaker: "Speaker", announce_notification: "Notification", announce_off: "Off",
-  watch: "Watch", watchFrom: "Watch from", watchTo: "Watch until", problemAt: "Alert when late by (min)",
+  sectionRoute: "Route", sectionAnnounce: "Announcements",
+  watch: "Watch", problemAt: "Alert when late by (min)", winFrom: "From", winTo: "Until",
+  addWindow: "Add window", removeWindow: "Remove this window",
+  boards: "Departure sensors", boardsEvery: "Update every (min)", boardsCount: "Departures listed",
+  boardsHint: "On these days and times, the next departure and departures sensors are kept up to date. Each update is one OJP request.",
+  usage: "API calls today: {0}", usagePart: "{0}: planned {1}, used {2} / {3}",
+  usageHint: "Planned: what today's watch windows and departure sensors cost. Used: the calls Andiamo made since midnight UTC, also for countdowns, checks and searches. Other apps using the same key aren't counted.",
+  limitTomtom: "TomTom calls per day", limitOjp: "opentransportdata.swiss calls per day", limitHint: "The free limit; change it for another plan.",
   watchHint: "On these days and times, the problem sensor turns on for traffic jams, delays or cancellations.",
   days: "Mo,Tu,We,Th,Fr,Sa,Su", watching: "Watching",
   problem_traffic: "Traffic jam +{0} min", problem_delayed: "{1} {2} late +{0} min", problem_cancelled: "{1} {2} cancelled",
@@ -29,9 +36,22 @@ const T = {
   messages: "Messages ({0})", messagesHint: "Leave a message empty to use the default. Placeholders:",
   msg_leave_at: "Leave at", msg_changed: "New time", msg_traffic_changed: "Traffic changed",
   msg_minutes_left: "Minutes left", msg_go_now: "Go now", msg_cancelled: "Cancelled", msg_no_connection: "No connection",
+  msg_drive_time: "Drive time", msg_drive_time_free: "Drive time, no traffic",
 };
 
-const PLACEHOLDERS = ["time", "minutes", "route", "line", "destination", "departure"];
+// A route's time windows, and what a new one starts with (Monday to Friday).
+const WINDOWS = {
+  watch_windows: { days: [0, 1, 2, 3, 4], from: "", to: "", problem_minutes: 15 },
+  departure_windows: { days: [0, 1, 2, 3, 4], from: "", to: "", every: 2, count: 5 },
+};
+// Window fields like "watch_windows.0.from" in a draft.
+const getPath = (obj, path) => path.split(".").reduce((o, k) => o?.[k], obj);
+const setPath = (obj, path, value) => {
+  const keys = path.split(".");
+  const last = keys.pop();
+  keys.reduce((o, k) => o[k], obj)[last] = value;
+};
+const PLACEHOLDERS = ["time", "minutes", "route", "line", "destination", "departure", "traffic", "km"];
 const ANNOUNCE = ["speaker", "notification", "off"];
 
 // OJP PtMode → what search results show next to a stop's name.
@@ -60,6 +80,8 @@ const clock = (iso) => {
   return new Date(iso).toLocaleTimeString(language, options);
 };
 const minutesUntil = (iso) => Math.max(0, Math.round((new Date(iso) - Date.now()) / 60000));
+// "41 min", from an hour on "1 h 41 min" (or just "2 h").
+const shortMinutes = (n) => (n < 60 ? `${n} min` : n % 60 ? `${Math.floor(n / 60)} h ${n % 60} min` : `${n / 60} h`);
 
 // What people type in "Arrive by": "18:30", "1830", "6:30 pm", "6pm" → "18:30"; anything else → null.
 const parseTime = (text) => {
@@ -95,6 +117,8 @@ const dateParts = () => {
   return { order, sep };
 };
 // "2026-10-19" in the user's HA date format.
+// A field just wide enough for a time or date in the user's format, plus padding and border.
+const fits = (text) => `style="width: calc(${String(text).length + 0.5}ch + 18px)"`;
 const showDate = (ymd) => {
   const [year, month, day] = ymd.split("-");
   const value = { year, month, day };
@@ -223,13 +247,13 @@ class AndiamoPanel extends HTMLElement {
     if (field) {
       const [key, name] = field.split("|");
       this._drafts[key] = this._drafts[key] || {};
-      this._drafts[key][name] = el.type === "checkbox" ? el.checked : el.value;
+      setPath(this._drafts[key], name, el.type === "checkbox" ? el.checked : el.value);
       if (e.type === "change" && el.tagName === "SELECT") this._render();
       // Show a typed time the way HA shows times.
       const time = el.dataset.timefield !== undefined && e.type === "change" && parseTime(el.value);
-      if (time) el.value = this._drafts[key][name] = showTime(time);
+      if (time) setPath(this._drafts[key], name, (el.value = showTime(time)));
       const date = el.dataset.datefield !== undefined && e.type === "change" && parseDate(el.value);
-      if (date) el.value = this._drafts[key][name] = showDate(date);
+      if (date) setPath(this._drafts[key], name, (el.value = showDate(date)));
     }
     if (el.dataset.setting && e.type === "change") {
       let value = el.type === "checkbox" ? el.checked : el.value;
@@ -268,7 +292,8 @@ class AndiamoPanel extends HTMLElement {
       case "tab": this._tab = arg; break;
       case "open": d[arg] = this._draftFor(arg); break;
       case "close": delete d[arg]; delete this._search[arg]; break;
-      case "press": await this._ws("press", { route_id: arg }); return;
+      case "start": await this._ws("start", { route_id: arg }); return;
+      case "check": await this._ws("check", { route_id: arg }); return;
       case "cancel-run": await this._ws("cancel", { route_id: arg }); return;
       case "start-car": {
         const typed = d[`start:${arg}`]?.time;
@@ -277,7 +302,7 @@ class AndiamoPanel extends HTMLElement {
         if (!time) { this._error = this._t("badTime", showTime("18:30")); break; }
         const date = parseDate(d[`start:${arg}`]?.date ?? "");
         if (!date) { this._error = this._t("badDate", showDate(today())); break; }
-        await this._ws("start_car", { route_id: arg, arrive_at: arriveAt(time, date) });
+        await this._ws("start", { route_id: arg, arrive_at: arriveAt(time, date) });
         delete d[`start:${arg}`];
         return;
       }
@@ -291,10 +316,22 @@ class AndiamoPanel extends HTMLElement {
         break;
       }
       case "toggle-day": {
-        const [key, day] = arg.split("#");
-        const days = new Set(d[key].watch_days || []);
+        const [key, path, day] = arg.split("#");
+        const window = getPath(d[key], path);
+        const days = new Set(window.days || []);
         days.has(Number(day)) ? days.delete(Number(day)) : days.add(Number(day));
-        d[key].watch_days = [...days].sort();
+        window.days = [...days].sort();
+        break;
+      }
+      case "add-window": {
+        const [key, list] = arg.split("#");
+        d[key][list] = [...(d[key][list] || []), structuredClone(WINDOWS[list])];
+        break;
+      }
+      case "remove-window": {
+        const [key, path] = arg.split("#");
+        const [list, i] = path.split(".");
+        d[key][list] = d[key][list].filter((_, j) => j !== Number(i));
         break;
       }
       case "save-loc": await this._saveLoc(arg); break;
@@ -341,15 +378,17 @@ class AndiamoPanel extends HTMLElement {
     const [kind, id, extra] = key.split(":");
     if (kind === "route") {
       if (id !== "new") {
-        const r = { ...this._data.routes.find((x) => x.id === id) };
-        // Watch times show the way HA shows times.
-        for (const f of ["watch_from", "watch_to"]) r[f] = r[f] ? showTime(r[f]) : "";
+        const r = structuredClone(this._data.routes.find((x) => x.id === id));
+        // Window times show the way HA shows times.
+        for (const list of Object.keys(WINDOWS)) {
+          for (const w of r[list] || []) for (const f of ["from", "to"]) w[f] = w[f] ? showTime(w[f]) : "";
+        }
         return r;
       }
       const main = this._data.locations.find((l) => l.main);
       const other = this._data.locations.find((l) => !l.main);
       return { mode: this._data.providers.transit ? "transit" : "car", origin_id: main?.id, destination_id: other?.id, lines: [],
-        watch_days: [], problem_minutes: 15 };
+        watch_windows: [], departure_windows: [] };
     }
     if (kind === "loc") return id === "new" ? {} : { ...this._loc(id) };
     if (kind === "station") {
@@ -383,13 +422,20 @@ class AndiamoPanel extends HTMLElement {
       lines: transit ? r.lines || [] : [],
       speaker: r.speaker || null,
       announce: r.announce || null,
-      watch_days: r.watch_days || [],
-      problem_minutes: Number(r.problem_minutes || 15),
     };
-    for (const f of ["watch_from", "watch_to"]) {
-      const typed = (r[f] || "").trim();
-      item[f] = typed ? parseTime(typed) : null;
-      if (typed && !item[f]) { this._error = this._t("badTime", showTime("06:30")); return; }
+    for (const list of Object.keys(WINDOWS)) {
+      item[list] = [];
+      if (list === "departure_windows" && !transit) continue;
+      for (const w of r[list] || []) {
+        const window = { ...w };
+        for (const f of ["from", "to"]) {
+          const typed = (w[f] || "").trim();
+          window[f] = typed ? parseTime(typed) : null;
+          if (typed && !window[f]) { this._error = this._t("badTime", showTime("06:30")); return; }
+        }
+        for (const f of ["problem_minutes", "every", "count"]) if (f in w) window[f] = Number(w[f] || WINDOWS[list][f]);
+        item[list].push(window);
+      }
     }
     if (r.id) item.id = r.id;
     await this._ws("route/save", { item });
@@ -440,10 +486,27 @@ class AndiamoPanel extends HTMLElement {
     return `
       <div class="page">
         <header><h1>Andiamo</h1><nav>${tabs}</nav></header>
+        ${this._usage()}
         ${this._error ? `<div class="error">${esc(this._error)}</div>` : ""}
         ${this._warnings()}
         ${body}
       </div>`;
+  }
+
+  // "TomTom: planned 120, used 45 / 2,500" with a bar each, so the free limits stay in sight.
+  _usage() {
+    const u = this._data.usage;
+    if (!u) return "";
+    const num = (n) => Number(n).toLocaleString(haLocale?.language);
+    const part = (name, { calls, planned, limit }) => {
+      // The bar fills with what's used; the rest of the plan shows lighter behind it.
+      const used = Math.min(1, calls / limit);
+      const plan = Math.min(1, Math.max(calls, planned) / limit);
+      return `<span class="usage-part">${this._t("usagePart", name, num(planned), num(calls), num(limit))}
+        <span class="bar"><span class="plan" style="width: ${Math.round(plan * 100)}%"></span><span class="${plan >= 0.8 ? "high" : ""}" style="width: ${Math.round(used * 100)}%"></span></span></span>`;
+    };
+    return `<div class="usage muted" title="${esc(this._t("usageHint"))}">${this._t("usage",
+      `${part("TomTom", u.tomtom)} · ${part("OJP", u.ojp)}`)}</div>`;
   }
 
   _warnings() {
@@ -455,12 +518,12 @@ class AndiamoPanel extends HTMLElement {
   }
 
   _input(key, name, attrs = "") {
-    const v = this._drafts[key]?.[name] ?? "";
+    const v = getPath(this._drafts[key], name) ?? "";
     return `<input data-draft="${key}|${name}" value="${esc(v)}" ${attrs}>`;
   }
 
   _select(key, name, options, attrs = "") {
-    const v = this._drafts[key]?.[name] ?? "";
+    const v = getPath(this._drafts[key], name) ?? "";
     return `<select data-draft="${key}|${name}" ${attrs}>${options
       .map(([value, label]) => `<option value="${esc(value)}" ${String(value) === String(v) ? "selected" : ""}>${esc(label)}</option>`)
       .join("")}</select>`;
@@ -494,21 +557,25 @@ class AndiamoPanel extends HTMLElement {
       // The name already says where; show how long the drive is instead.
       where = esc(driveText(this._data.trips?.[r.id], (k, v) => this._t(k, v)));
     }
+    // Car routes: check the drive time now, right before Start or Stop.
+    const check = r.mode === "car"
+      ? `<button class="icon" data-action="check" data-arg="${r.id}" title="${this._t("checkHint")}" aria-label="${this._t("checkHint")}" ${this._data.providers.car ? "" : "disabled"}><ha-icon icon="mdi:car-clock"></ha-icon></button>`
+      : "";
     let action;
     if (run) {
       const delay = run.delay_minutes ? ` <span class="late">${this._t("delay", run.delay_minutes)}</span>` : "";
       const line = run.line ? ` · ${esc(run.line)} ${run.departure ? clock(run.departure) : ""}${delay}`
         : run.arrive_at ? ` · ${this._t("arriveBy")} ${esc(arrival(run.arrive_at))}` : "";
-      action = `<span class="run">${run.leave_at ? `${this._t("leaveAt", clock(run.leave_at))} · ${this._t("inMin", minutesUntil(run.leave_at))}` : this._t("running")}${line}</span>
-        <button data-action="cancel-run" data-arg="${r.id}">${this._t("stop")}</button>`;
+      action = `<span class="run">${run.leave_at ? `${this._t("inMin", shortMinutes(minutesUntil(run.leave_at)))} · ${this._t("leaveAt", clock(run.leave_at))}` : this._t("running")}${line}</span>
+        ${check}<button data-action="cancel-run" data-arg="${r.id}">${this._t("stop")}</button>`;
     } else if (r.mode === "transit") {
-      action = `<button class="primary" data-action="press" data-arg="${r.id}" ${this._data.providers.transit && r.lines?.length ? "" : "disabled"}>${this._t("start")}</button>`;
+      action = `<button class="primary" data-action="start" data-arg="${r.id}" ${this._data.providers.transit && r.lines?.length ? "" : "disabled"}>${this._t("start")}</button>`;
     } else {
       const key = `start:${r.id}`;
       const date = this._drafts[key]?.date ?? showDate(today());
-      action = `<label class="inline">${this._t("arriveBy")} ${this._input(key, "time", `type="text" class="time" data-timefield placeholder="${esc(showTime("18:30"))}" data-enter="start-car" data-arg="${r.id}"`)}</label>
-        <input data-draft="${key}|date" value="${esc(date)}" type="text" class="date" data-datefield data-enter="start-car" data-arg="${r.id}" aria-label="${this._t("date")}">
-        <button class="primary" data-action="start-car" data-arg="${r.id}" ${this._data.providers.car ? "" : "disabled"}>${this._t("start")}</button>`;
+      action = `<label class="inline">${this._t("arriveBy")} ${this._input(key, "time", `type="text" class="time" data-timefield placeholder="${esc(showTime("18:30"))}" ${fits(showTime("18:30"))} data-enter="start-car" data-arg="${r.id}"`)}</label>
+        <input data-draft="${key}|date" value="${esc(date)}" type="text" class="date" ${fits(showDate(today()))} data-datefield data-enter="start-car" data-arg="${r.id}" aria-label="${this._t("date")}">
+        ${check}<button class="primary" data-action="start-car" data-arg="${r.id}" ${this._data.providers.car ? "" : "disabled"}>${this._t("start")}</button>`;
     }
     const problem = this._data.problems?.[r.id];
     const watch = problem ? `<div class="late">⚠ ${esc(this._problemText(problem))}</div>`
@@ -529,44 +596,65 @@ class AndiamoPanel extends HTMLElement {
     const transit = r.mode === "transit";
     const places = this._data.locations.map((l) => [l.id, l.name]);
     const modes = [["transit", this._t("transit")], ["car", this._t("car")]];
-    let fields;
+    let where;
     if (transit) {
       const stations = [["", this._t("mainStation")], ...this._stationsOf(r.origin_id).map((s) => [s.id, `${s.name} (${s.walk_minutes}′)`])];
-      fields = `
+      where = `
         <label>${this._t("station")} ${this._select(key, "station_id", stations)}</label>
         <div class="wide"><div class="muted">${this._t("lines")}</div>${this._lineChecks(key)}</div>`;
     } else {
-      fields = `<label>${this._t("to")} ${this._select(key, "destination_id", places)}</label>`;
+      where = `<label>${this._t("to")} ${this._select(key, "destination_id", places)}</label>`;
     }
     const settings = this._data.settings.speaker;
     const fallback = settings ? this._hass.states[settings]?.attributes.friendly_name || settings : this._t("none");
     const speakers = [["", this._t("defaultSpeaker", fallback)], ...this._entities("media_player")];
-    fields += `<label>${this._t("speaker")} ${this._select(key, "speaker", speakers)}</label>`;
     const announceDefault = this._t(`announce_${this._data.settings.announce || "speaker"}`);
-    fields += `<label>${this._t("announceOn")} ${this._select(key, "announce",
-      [["", this._t("defaultSpeaker", announceDefault)], ...ANNOUNCE.map((a) => [a, this._t(`announce_${a}`)])])}</label>`;
-    const days = new Set(r.watch_days || []);
-    const dayChecks = this._t("days").split(",").map((name, i) => `
-      <label class="check"><input type="checkbox" data-action="toggle-day" data-arg="${esc(key)}#${i}" ${days.has(i) ? "checked" : ""}> ${name}</label>`).join("");
-    const placeholder = (t) => `type="text" class="time" data-timefield placeholder="${esc(showTime(t))}"`;
-    fields += `
-      <div class="wide"><div class="muted">${this._t("watch")}</div><div class="days">${dayChecks}</div>
-        <div class="muted">${this._t("watchHint")}</div></div>
-      <label>${this._t("watchFrom")} ${this._input(key, "watch_from", placeholder("06:30"))}</label>
-      <label>${this._t("watchTo")} ${this._input(key, "watch_to", placeholder("08:00"))}</label>
-      <label>${this._t("problemAt")} ${this._input(key, "problem_minutes", 'type="number" min="1" max="180"')}</label>`;
+    const number = (path, label, min, max) => `<label>${this._t(label)} ${this._input(key, path, `type="number" min="${min}" max="${max}"`)}</label>`;
     const ready = !transit || r.lines?.length;
     return `
-      <div class="form">
-        <label>${this._t("name")} ${this._input(key, "name", `placeholder="${esc(this._routeName(r))}" data-enter="save-route" data-arg="${key}"`)}</label>
-        <label>${this._t("mode")} ${this._select(key, "mode", modes)}</label>
-        <label>${this._t("from")} ${this._select(key, "origin_id", places)}</label>
-        ${fields}
+      <div class="form route">
+        ${this._group(this._t("sectionRoute"), "", `<div class="fields">
+          <label>${this._t("name")} ${this._input(key, "name", `placeholder="${esc(this._routeName(r))}" data-enter="save-route" data-arg="${key}"`)}</label>
+          <label>${this._t("mode")} ${this._select(key, "mode", modes)}</label>
+          <label>${this._t("from")} ${this._select(key, "origin_id", places)}</label>
+          ${where}</div>`)}
+        ${this._group(this._t("sectionAnnounce"), "", `<div class="fields">
+          <label>${this._t("speaker")} ${this._select(key, "speaker", speakers)}</label>
+          <label>${this._t("announceOn")} ${this._select(key, "announce",
+            [["", this._t("defaultSpeaker", announceDefault)], ...ANNOUNCE.map((a) => [a, this._t(`announce_${a}`)])])}</label></div>`)}
+        ${this._group(this._t("watch"), this._t("watchHint"),
+          this._windows(key, "watch_windows", (p) => number(`${p}.problem_minutes`, "problemAt", 1, 180)))}
+        ${transit ? this._group(this._t("boards"), this._t("boardsHint"),
+          this._windows(key, "departure_windows", (p) => number(`${p}.every`, "boardsEvery", 1, 60) + number(`${p}.count`, "boardsCount", 1, 20))) : ""}
         <div class="buttons">
           <button class="primary" data-action="save-route" data-arg="${key}" ${ready ? "" : "disabled"}>${this._t("save")}</button>
           <button data-action="close" data-arg="${key}">${this._t("cancel")}</button>
         </div>
       </div>`;
+  }
+
+  _group(title, hint, body) {
+    return `<div class="group"><div class="group-title">${title}</div>${hint ? `<div class="muted">${hint}</div>` : ""}${body}</div>`;
+  }
+
+  // A route's time windows (watch or departure sensors): days, from, until, plus the window's own settings.
+  _windows(key, list, extra) {
+    const placeholder = (t) => `type="text" class="time" data-timefield placeholder="${esc(showTime(t))}"`;
+    const names = this._t("days").split(",");
+    const rows = (this._drafts[key][list] || []).map((w, i) => {
+      const path = `${list}.${i}`;
+      const days = new Set(w.days || []);
+      const checks = names.map((name, d) => `
+        <label class="check"><input type="checkbox" data-action="toggle-day" data-arg="${esc(key)}#${path}#${d}" ${days.has(d) ? "checked" : ""}> ${name}</label>`).join("");
+      return `<div class="window">
+        <div class="days">${checks}</div>
+        <label>${this._t("winFrom")} ${this._input(key, `${path}.from`, placeholder("06:30"))}</label>
+        <label>${this._t("winTo")} ${this._input(key, `${path}.to`, placeholder("08:00"))}</label>
+        ${extra(path)}
+        <button class="ghost danger" data-action="remove-window" data-arg="${esc(key)}#${path}" title="${this._t("removeWindow")}" aria-label="${this._t("removeWindow")}">✕</button>
+      </div>`;
+    }).join("");
+    return `${rows}<button class="add" data-action="add-window" data-arg="${esc(key)}#${list}">+ ${this._t("addWindow")}</button>`;
   }
 
   _problemText(p) {
@@ -724,6 +812,8 @@ class AndiamoPanel extends HTMLElement {
         ${row(this._t("lead"), this._t("leadHint"), `<input type="number" min="5" max="180" step="5" data-setting="car_lead_minutes" value="${s.car_lead_minutes}"> ${this._t("min")}`)}
         ${row(this._t("announceOn"), this._t("announceHint"), `<select data-setting="announce">${ANNOUNCE
           .map((a) => `<option value="${a}" ${a === s.announce ? "selected" : ""}>${this._t(`announce_${a}`)}</option>`).join("")}</select>`)}
+        ${row(this._t("limitTomtom"), this._t("limitHint"), `<input type="number" min="1" step="100" data-setting="limit_tomtom" value="${s.limit_tomtom}">`)}
+        ${row(this._t("limitOjp"), this._t("limitHint"), `<input type="number" min="1" step="100" data-setting="limit_ojp" value="${s.limit_ojp}">`)}
       </section>
       ${this._messages(row)}
       <p class="muted">${esc(this._t("keysHint"))}</p>`;
@@ -774,10 +864,27 @@ const STYLE = `
   button.ghost { border-color: transparent; color: var(--secondary-text-color); }
   button.danger:hover { color: var(--error-color); }
   button:disabled { opacity: 0.4; cursor: default; }
+  .usage { margin: -8px 0 12px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .usage-part { display: inline-flex; gap: 6px; align-items: center; }
+  .usage .bar { position: relative; display: inline-block; width: 60px; height: 6px; border-radius: 3px; background: var(--divider-color); overflow: hidden; }
+  .usage .bar > span { position: absolute; left: 0; top: 0; height: 100%; background: var(--primary-color); }
+  .usage .bar > span.plan { opacity: 0.35; }
+  .usage .bar > span.high { background: var(--error-color); }
+  button.icon { display: inline-flex; align-items: center; align-self: stretch; padding: 0 8px; --mdc-icon-size: 20px; }
   button.add { border: none; color: var(--primary-color); padding: 10px 0; display: block; }
   input, select { font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--divider-color);
     background: var(--secondary-background-color); color: var(--primary-text-color); box-sizing: border-box; }
-  .form { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; padding: 12px 0; }
+  /* An open form is framed, so the next row clearly isn't part of it. */
+  .form { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; padding: 12px 16px; margin: 8px 0 12px;
+    border: 1px solid var(--primary-color); border-radius: 8px; }
+  .form.route { display: block; padding-top: 0; }
+  .group { padding: 12px 0; border-bottom: 1px solid var(--divider-color); }
+  .group-title { font-weight: 500; margin-bottom: 6px; }
+  .group .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+  .form.route .buttons { padding-top: 12px; }
+  .window { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 16px; padding: 8px 0; border-bottom: 1px dashed var(--divider-color); }
+  .window .days { margin: 0; align-self: center; gap: 4px 10px; }
+  .window input[type="number"] { width: 80px; }
   .form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9em; color: var(--secondary-text-color); }
   .form label.check { flex-direction: row; align-items: center; gap: 8px; color: var(--primary-text-color); }
   label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9em; }

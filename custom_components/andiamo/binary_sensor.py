@@ -8,10 +8,12 @@ from homeassistant.components.binary_sensor import BinarySensorDeviceClass, Bina
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from . import AndiamoConfigEntry
 from .const import SIGNAL_PROBLEMS_CHANGED
 from .entity import RouteEntity, setup_route_entities
+from .windows import active
 
 
 async def async_setup_entry(
@@ -40,6 +42,9 @@ class ProblemSensor(RouteEntity, BinarySensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
             "watching": self.route_id in self.runtime.watchdog.watching,
-            "problem_minutes": self.route.get("problem_minutes"),
+            # The limit of the window watching now; none outside the windows.
+            "problem_minutes": (active(self.route.get("watch_windows"), dt_util.now()) or {}).get(
+                "problem_minutes"
+            ),
             **self.runtime.watchdog.problems.get(self.route_id, {}),
         }

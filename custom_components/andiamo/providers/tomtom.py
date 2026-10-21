@@ -69,6 +69,7 @@ class TomTomProvider(CarProvider):
         return parse_places(data)
 
     async def _get(self, url: str, params: dict[str, str]) -> dict[str, Any]:
+        self.counted()
         try:
             async with self._session.get(
                 url, params={**params, "key": self._api_key}, timeout=TIMEOUT

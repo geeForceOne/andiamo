@@ -44,6 +44,15 @@ def arrival(time_of_day: time, day: date | None = None) -> datetime:
     return when
 
 
+def drive_of(trip: Trip) -> dict[str, Any]:
+    """A trip as the route list and the drive time sensor show it."""
+    return {
+        "travel_minutes": round(trip.travel_seconds / 60),
+        "traffic_minutes": round(trip.traffic_delay_seconds / 60),
+        "length_km": round(trip.length_meters / 1000, 1),
+    }
+
+
 class RunManager:
     """Holds the countdown of each route that is running."""
 
@@ -64,6 +73,8 @@ class RunManager:
         # The last announcement per route, kept after the run ends:
         # {route_id: {"message": text, "message_at": iso}}.
         self.messages: dict[str, dict[str, str]] = {}
+        # The last "check now" per car route: drive time, traffic, km, message, checked_at.
+        self.checks: dict[str, dict[str, Any]] = {}
 
     async def async_resume(self) -> None:
         """Pick up car countdowns that were set up before a restart."""
@@ -146,6 +157,43 @@ class RunManager:
         }
         await self.store.async_save(notify=False)
         self.changed()
+
+    async def async_check_car(self, route_id: str, speaker: str | None = None) -> dict[str, Any]:
+        """How long a car route takes right now; said on the speaker if announcing there."""
+        route = self.store.route(route_id)
+        if route["mode"] != MODE_CAR:
+            raise DataError(f"{route['name']} is not a car route")
+        origin = self.store.location(route["origin_id"])
+        destination = self.store.location(route["destination_id"])
+        trip = await self.car().trip_now(
+            (origin["latitude"], origin["longitude"]),
+            (destination["latitude"], destination["longitude"]),
+        )
+        drive = drive_of(trip)
+        settings = self.store.settings
+        language = settings.get("language", "de")
+        key = "drive_time" if drive["traffic_minutes"] else "drive_time_free"
+        message = text(
+            language,
+            key,
+            settings.get("templates", {}).get(language),
+            route=route["name"],
+            destination=destination["name"],
+            minutes=minutes(language, drive["travel_minutes"]),
+            traffic=minutes(language, drive["traffic_minutes"]),
+            km=f"{drive['length_km']:g}",
+        )
+        result = {**drive, "message": message, "checked_at": dt_util.utcnow().isoformat()}
+        self.checks[route_id] = result
+        if self.store.trips.get(route_id) != drive:
+            self.store.trips[route_id] = drive
+            await self.store.async_save(notify=False)
+        announce = route.get("announce") or settings.get("announce") or ANNOUNCE_SPEAKER
+        if announce == ANNOUNCE_SPEAKER:
+            speaker = speaker or route.get("speaker") or settings.get("speaker")
+            await self.announcer.async_say(message, route, speaker, announce)
+        self.changed()
+        return result
 
     async def async_cancel(self, route_id: str, say: bool = True) -> None:
         run = self.runs.pop(route_id, None)
@@ -464,11 +512,7 @@ class CarRun(Run):
 
     async def _remember(self, trip: Trip) -> None:
         """Keep the drive time for the route list, also after the run."""
-        drive = {
-            "travel_minutes": round(trip.travel_seconds / 60),
-            "traffic_minutes": round(trip.traffic_delay_seconds / 60),
-            "length_km": round(trip.length_meters / 1000, 1),
-        }
+        drive = drive_of(trip)
         trips = self.manager.store.trips
         if trips.get(self.route["id"]) != drive:
             trips[self.route["id"]] = drive

@@ -44,6 +44,16 @@
         }
       }
     },
+    "check": {
+      "name": "Check drive time",
+      "description": "Gets a car route's drive time and traffic delay right now. It's said on the speaker when announcements go to the speaker, and returned as a response for automations.",
+      "fields": {
+        "speaker": {
+          "name": "Speaker",
+          "description": "Say it on this speaker. Leave it out for the route's speaker, or the default one in Settings."
+        }
+      }
+    },
     "stop": {
       "name": "Stop",
       "description": "Stops a route's countdown."

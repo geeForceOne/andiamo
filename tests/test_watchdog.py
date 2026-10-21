@@ -11,7 +11,8 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.andiamo.providers import Departure, ProviderError
 from custom_components.andiamo.store import AndiamoStore
-from custom_components.andiamo.watchdog import Watchdog, in_window
+from custom_components.andiamo.watchdog import Watchdog
+from custom_components.andiamo.windows import check, in_window
 
 # Monday 10:00 in Zurich.
 START = datetime(2026, 10, 19, 8, 0, tzinfo=dt_util.UTC)
@@ -50,8 +51,28 @@ def departure(minutes: float, delay: float = 0, cancelled: bool = False, line: s
     ],
 )
 def test_in_window(days, start, end, now, expected) -> None:
-    route = {"watch_days": days, "watch_from": start, "watch_to": end}
-    assert in_window(route, now) is expected
+    assert in_window({"days": days, "from": start, "to": end}, now) is expected
+
+
+@pytest.mark.parametrize(
+    ("windows", "error"),
+    [
+        ([{"days": [0], "from": "06:30", "to": "08:00"}, {"days": [5, 6], "from": "06:30", "to": "08:00"}], None),
+        # Back to back is fine.
+        ([{"days": [0], "from": "06:30", "to": "08:00"}, {"days": [0], "from": "08:00", "to": "09:00"}], None),
+        ([{"days": [0, 1], "from": "06:30", "to": "08:00"}, {"days": [1], "from": "07:00", "to": "09:00"}],
+         "Watch windows overlap on Tue 07:00–08:00"),
+        # Sunday night runs into Monday morning.
+        ([{"days": [6], "from": "23:00", "to": "02:00"}, {"days": [0], "from": "01:00", "to": "03:00"}],
+         "Watch windows overlap on Mon 01:00–02:00"),
+    ],
+)
+def test_windows_overlap(windows, error) -> None:
+    if error is None:
+        check(windows, "watch")
+    else:
+        with pytest.raises(ValueError, match=error):
+            check(windows, "watch")
 
 
 @pytest.fixture(autouse=True)
@@ -67,7 +88,7 @@ async def routes(store: AndiamoStore) -> dict[str, dict]:
     await store.async_save_station(
         {"location_id": home["id"], "name": "Tram", "stop_ref": "ch:1:sloid:1", "walk_minutes": 5}
     )
-    window = {"watch_days": [MONDAY], "watch_from": "09:00", "watch_to": "11:00", "problem_minutes": 15}
+    window = {"watch_windows": [{"days": [MONDAY], "from": "09:00", "to": "11:00", "problem_minutes": 15}]}
     transit = await store.async_save_route(
         {
             "name": "Tram",

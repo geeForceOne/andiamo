@@ -128,9 +128,30 @@ async def test_old_routes_cleaned_on_load(hass: HomeAssistant, store: AndiamoSto
     assert again.routes == [
         {"id": "r1", "name": "Old", "mode": "transit", "origin_id": home["id"],
          "destination_id": None, "station_id": None, "speaker": "media_player.x",
-         "lines": [], "announce": None, "watch_days": [], "watch_from": None,
-         "watch_to": None, "problem_minutes": 15}
+         "lines": [], "announce": None, "watch_windows": [], "departure_windows": []}
     ]
+
+
+async def test_one_window_becomes_a_list(hass: HomeAssistant, store: AndiamoStore) -> None:
+    home = store.locations[0]
+    store.routes.append({
+        "id": "r1", "name": "Old", "mode": "transit", "origin_id": home["id"], "lines": [],
+        "watch_days": [0, 1], "watch_from": "06:30", "watch_to": "08:00", "problem_minutes": 10,
+        "departures_days": [5], "departures_from": "09:00", "departures_to": "10:00",
+        "departures_every": 3, "departures_count": 4,
+    })
+    await store.async_save()
+
+    again = AndiamoStore(hass)
+    await again.async_load()
+    route = again.routes[0]
+    assert route["watch_windows"] == [
+        {"days": [0, 1], "from": "06:30", "to": "08:00", "problem_minutes": 10}
+    ]
+    assert route["departure_windows"] == [
+        {"days": [5], "from": "09:00", "to": "10:00", "every": 3, "count": 4}
+    ]
+    assert "watch_days" not in route and "departures_every" not in route
 
 
 async def test_old_car_runs_load(hass: HomeAssistant, store: AndiamoStore) -> None:
@@ -160,8 +181,12 @@ async def test_watch_needs_start_and_end(store: AndiamoStore) -> None:
     route = {"name": "Work", "mode": "car", "origin_id": home["id"], "destination_id": work["id"]}
 
     with pytest.raises(DataError, match="starts and ends"):
-        await store.async_save_route({**route, "watch_days": [0], "watch_from": "06:30"})
+        await store.async_save_route({**route, "watch_windows": [{"days": [0], "from": "06:30"}]})
+    with pytest.raises(DataError, match="Pick the days"):
+        await store.async_save_route(
+            {**route, "watch_windows": [{"days": [], "from": "06:30", "to": "08:00"}]}
+        )
     saved = await store.async_save_route(
-        {**route, "watch_days": [0], "watch_from": "06:30", "watch_to": "08:00"}
+        {**route, "watch_windows": [{"days": [0], "from": "06:30", "to": "08:00"}]}
     )
-    assert saved["watch_days"] == [0]
+    assert saved["watch_windows"][0]["days"] == [0]

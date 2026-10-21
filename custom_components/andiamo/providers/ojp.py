@@ -81,6 +81,7 @@ class OjpProvider(TransitProvider):
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/xml",
         }
+        self.counted()
         try:
             async with self._session.post(
                 URL, data=xml.encode(), headers=headers, timeout=TIMEOUT

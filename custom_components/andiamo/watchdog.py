@@ -1,9 +1,9 @@
-"""Watchdog: checks routes in their time window for traffic jams, delays and cancellations."""
+"""Watchdog: checks routes in their time windows for traffic jams, delays and cancellations."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 import logging
 from typing import Any
 
@@ -21,33 +21,9 @@ from .const import (
 )
 from .providers import CarProvider, Departure, ProviderError, TransitProvider
 from .store import AndiamoStore, DataError
+from .windows import active
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def in_window(route: dict[str, Any], now: datetime) -> bool:
-    """Whether `now` (local time) falls in the route's watch window.
-
-    A window that ends before it starts runs past midnight and belongs to the
-    day it started on.
-    """
-    days = route.get("watch_days") or []
-    start, end = _time(route.get("watch_from")), _time(route.get("watch_to"))
-    if not days or start is None or end is None:
-        return False
-    current = now.time().replace(second=0, microsecond=0)
-    if start < end:
-        return now.weekday() in days and start <= current < end
-    if current >= start:
-        return now.weekday() in days
-    return current < end and (now - timedelta(days=1)).weekday() in days
-
-
-def _time(value: str | None) -> time | None:
-    try:
-        return time.fromisoformat(value) if value else None
-    except ValueError:
-        return None
 
 
 def _config(route: dict[str, Any]) -> tuple[Any, ...]:
@@ -56,7 +32,7 @@ def _config(route: dict[str, Any]) -> tuple[Any, ...]:
         str(route.get(key))
         for key in (
             "mode", "origin_id", "destination_id", "station_id", "lines",
-            "watch_days", "watch_from", "watch_to", "problem_minutes",
+            "watch_windows",
         )
     )
 
@@ -119,13 +95,14 @@ class Watchdog:
             if route_ids is not None and route_id not in route_ids:
                 continue
             self._configs[route_id] = _config(route)
-            if not in_window(route, now):
+            window = active(route.get("watch_windows"), now)
+            if window is None:
                 self.watching.discard(route_id)
                 self.problems.pop(route_id, None)
                 continue
             self.watching.add(route_id)
             try:
-                problem = await self._check(route)
+                problem = await self._check(route, window)
             except (ProviderError, DataError) as err:
                 # Keep what we knew; the next check tries again.
                 _LOGGER.warning("Watchdog can't check %s: %s", route["name"], err)
@@ -137,8 +114,8 @@ class Watchdog:
         if (self.problems, self.watching) != before:
             async_dispatcher_send(self.hass, SIGNAL_PROBLEMS_CHANGED)
 
-    async def _check(self, route: dict[str, Any]) -> dict[str, Any] | None:
-        limit = route.get("problem_minutes") or DEFAULT_PROBLEM_MINUTES
+    async def _check(self, route: dict[str, Any], window: dict[str, Any]) -> dict[str, Any] | None:
+        limit = window.get("problem_minutes") or DEFAULT_PROBLEM_MINUTES
         if route["mode"] == MODE_CAR:
             return await self._check_car(route, limit)
         return await self._check_transit(route, limit)

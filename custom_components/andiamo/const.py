@@ -21,6 +21,12 @@ EVENT_ANNOUNCEMENT: Final = f"{DOMAIN}_announcement"
 SIGNAL_RUNS_CHANGED: Final = f"{DOMAIN}_runs_changed"
 SIGNAL_DATA_CHANGED: Final = f"{DOMAIN}_data_changed"
 SIGNAL_PROBLEMS_CHANGED: Final = f"{DOMAIN}_problems_changed"
+SIGNAL_USAGE_CHANGED: Final = f"{DOMAIN}_usage_changed"
+SIGNAL_BOARDS_CHANGED: Final = f"{DOMAIN}_boards_changed"
+
+# The free daily API calls (changeable in Settings for other plans).
+DEFAULT_LIMIT_TOMTOM: Final = 2500
+DEFAULT_LIMIT_OJP: Final = 20000
 
 MODE_TRANSIT: Final = "transit"
 MODE_CAR: Final = "car"
@@ -53,3 +59,7 @@ TRANSIT_CHANGE_THRESHOLD: Final = timedelta(minutes=1)
 TRANSIT_RECHECK: Final = timedelta(minutes=1)
 CAR_RECHECK_NEAR: Final = timedelta(minutes=2)
 CAR_RECHECK_FAR: Final = timedelta(minutes=15)
+
+# Departure sensors: how often they ask again by default, and how many they list.
+DEFAULT_DEPARTURES_EVERY: Final = 2
+DEFAULT_DEPARTURES_COUNT: Final = 5

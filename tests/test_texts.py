@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from custom_components.andiamo.texts import text, unknown_placeholders
+from custom_components.andiamo.texts import short_minutes, text, unknown_placeholders
 
 
 def test_template_replaces_default() -> None:
@@ -26,3 +26,9 @@ def test_broken_template_uses_default() -> None:
 def test_unknown_placeholders() -> None:
     assert unknown_placeholders("um {time} mit {line}") == []
     assert unknown_placeholders("um {tme}") == ["tme"]
+
+
+def test_short_minutes() -> None:
+    assert short_minutes(41) == "41 min"
+    assert short_minutes(60) == "1 h"
+    assert short_minutes(101) == "1 h 41 min"

@@ -19,6 +19,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "go_now": "Los jetzt!",
         "cancelled": "Abgebrochen.",
         "no_connection": "Ich finde keine Verbindung für {route}.",
+        "drive_time": "Bis {destination} brauchst du jetzt {minutes}, davon {traffic} Stau.",
+        "drive_time_free": "Bis {destination} brauchst du jetzt {minutes}, kein Stau.",
         "minute": "1 Minute",
         "minutes": "{n} Minuten",
     },
@@ -30,6 +32,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "go_now": "Go now!",
         "cancelled": "Cancelled.",
         "no_connection": "I can't find a connection for {route}.",
+        "drive_time": "Driving to {destination} takes {minutes} right now, including {traffic} of traffic.",
+        "drive_time_free": "Driving to {destination} takes {minutes} right now, no traffic.",
         "minute": "1 minute",
         "minutes": "{n} minutes",
     },
@@ -39,8 +43,9 @@ TEXTS: dict[str, dict[str, str]] = {
 # Messages the user can replace in Settings, and what they can put in them.
 MESSAGES = (
     "leave_at", "changed", "traffic_changed", "minutes_left", "go_now", "cancelled", "no_connection",
+    "drive_time", "drive_time_free",
 )
-PLACEHOLDERS = ("time", "minutes", "route", "line", "destination", "departure")
+PLACEHOLDERS = ("time", "minutes", "route", "line", "destination", "departure", "traffic", "km")
 
 
 def unknown_placeholders(template: str) -> list[str]:
@@ -73,6 +78,14 @@ def minutes(language: str, count: int) -> str:
 
 def clock(value: datetime) -> str:
     return dt_util.as_local(value).strftime("%H:%M")
+
+
+def short_minutes(count: int) -> str:
+    """For displays: "41 min", from an hour on "1 h 41 min" (or just "2 h")."""
+    if count < 60:
+        return f"{count} min"
+    hours, rest = divmod(count, 60)
+    return f"{hours} h {rest} min" if rest else f"{hours} h"
 
 
 def minutes_until(target: datetime, now: datetime) -> int:

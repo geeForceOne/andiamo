@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict
-from datetime import datetime
+import asyncio
+from datetime import datetime, timedelta
 from functools import wraps
 from typing import TYPE_CHECKING, Any
 
@@ -14,12 +15,15 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 
 from .const import (
     ANNOUNCE_MODES,
     CONF_OJP_KEY,
     CONF_TOMTOM_KEY,
+    DEFAULT_DEPARTURES_COUNT,
+    DEFAULT_DEPARTURES_EVERY,
     DEFAULT_PROBLEM_MINUTES,
     DOMAIN,
     LANGUAGES,
@@ -28,6 +32,7 @@ from .const import (
     SIGNAL_DATA_CHANGED,
     SIGNAL_PROBLEMS_CHANGED,
     SIGNAL_RUNS_CHANGED,
+    SIGNAL_USAGE_CHANGED,
 )
 from .providers import lines_of
 from .texts import MESSAGES, TEXTS, unknown_placeholders
@@ -74,6 +79,33 @@ LINE = vol.Schema(
         vol.Optional("mode", default=""): str,
     }
 )
+_DAYS = vol.All(
+    [vol.All(vol.Coerce(int), vol.Range(min=0, max=6))], lambda days: sorted(set(days))
+)
+# From/until may be missing here; the store says which window needs them.
+WATCH_WINDOW = vol.Schema(
+    {
+        vol.Required("days"): _DAYS,
+        vol.Optional("from", default=None): vol.Any(None, _hhmm),
+        vol.Optional("to", default=None): vol.Any(None, _hhmm),
+        vol.Optional("problem_minutes", default=DEFAULT_PROBLEM_MINUTES): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=180)
+        ),
+    }
+)
+DEPARTURE_WINDOW = vol.Schema(
+    {
+        vol.Required("days"): _DAYS,
+        vol.Optional("from", default=None): vol.Any(None, _hhmm),
+        vol.Optional("to", default=None): vol.Any(None, _hhmm),
+        vol.Optional("every", default=DEFAULT_DEPARTURES_EVERY): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=60)
+        ),
+        vol.Optional("count", default=DEFAULT_DEPARTURES_COUNT): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=20)
+        ),
+    }
+)
 ROUTE = vol.Schema(
     {
         vol.Optional("id"): str,
@@ -85,14 +117,8 @@ ROUTE = vol.Schema(
         vol.Optional("lines", default=list): [LINE],
         vol.Optional("speaker", default=None): _OPTIONAL_STR,
         vol.Optional("announce", default=None): vol.Any(None, vol.In(ANNOUNCE_MODES)),
-        vol.Optional("watch_days", default=list): vol.All(
-            [vol.All(vol.Coerce(int), vol.Range(min=0, max=6))], lambda days: sorted(set(days))
-        ),
-        vol.Optional("watch_from", default=None): vol.Any(None, _hhmm),
-        vol.Optional("watch_to", default=None): vol.Any(None, _hhmm),
-        vol.Optional("problem_minutes", default=DEFAULT_PROBLEM_MINUTES): vol.All(
-            vol.Coerce(int), vol.Range(min=1, max=180)
-        ),
+        vol.Optional("watch_windows", default=list): [WATCH_WINDOW],
+        vol.Optional("departure_windows", default=list): [DEPARTURE_WINDOW],
     }
 )
 def _template(value: str) -> str:
@@ -108,6 +134,8 @@ SETTINGS = vol.Schema(
         vol.Optional("language"): vol.In(LANGUAGES),
         vol.Optional("car_lead_minutes"): vol.All(vol.Coerce(int), vol.Range(min=5, max=180)),
         vol.Optional("announce"): vol.In(ANNOUNCE_MODES),
+        vol.Optional("limit_tomtom"): vol.All(vol.Coerce(int), vol.Range(min=1)),
+        vol.Optional("limit_ojp"): vol.All(vol.Coerce(int), vol.Range(min=1)),
         vol.Optional("templates"): {vol.In(LANGUAGES): {vol.In(MESSAGES): vol.All(str, _template)}},
     }
 )
@@ -125,6 +153,7 @@ def _state(runtime: AndiamoRuntime) -> dict[str, Any]:
         **runtime.store.as_dict(),
         "runs": runtime.runs.as_list(),
         **runtime.watchdog.as_dict(),
+        "usage": runtime.usage.as_dict(),
         "messages": {lang: {key: TEXTS[lang][key] for key in MESSAGES} for lang in LANGUAGES},
         "providers": {
             MODE_TRANSIT: bool(runtime.entry.data.get(CONF_OJP_KEY)),
@@ -171,9 +200,10 @@ def async_register(hass: HomeAssistant) -> None:
         ws_search_stops,
         ws_search_places,
         ws_lines,
-        ws_press,
-        ws_start_car,
+        ws_start,
+        ws_check,
         ws_cancel,
+        ws_timetable,
     ):
         websocket_api.async_register_command(hass, command)
 
@@ -198,6 +228,7 @@ def ws_subscribe(
         async_dispatcher_connect(hass, SIGNAL_DATA_CHANGED, send),
         async_dispatcher_connect(hass, SIGNAL_RUNS_CHANGED, send),
         async_dispatcher_connect(hass, SIGNAL_PROBLEMS_CHANGED, send),
+        async_dispatcher_connect(hass, SIGNAL_USAGE_CHANGED, send),
     ]
 
     @callback
@@ -264,21 +295,74 @@ async def ws_lines(hass, runtime, msg):
     return [asdict(line) for line in lines_of(departures)]
 
 
-@_command("press", {vol.Required("route_id"): str})
-async def ws_press(hass, runtime, msg):
-    await runtime.runs.async_press(msg["route_id"])
+@_command("start", {vol.Required("route_id"): str, vol.Optional("arrive_at"): str})
+async def ws_start(hass, runtime, msg):
+    """Start a route like the andiamo.start action; car routes need `arrive_at`."""
+    arrive_at = None
+    if "arrive_at" in msg:
+        arrive_at = dt_util.parse_datetime(msg["arrive_at"])
+        if arrive_at is None:
+            raise HomeAssistantError(f"Unreadable time {msg['arrive_at']}")
+        if arrive_at.tzinfo is None:
+            arrive_at = arrive_at.replace(tzinfo=dt_util.get_default_time_zone())
+    await runtime.runs.async_start(msg["route_id"], arrive_at)
 
 
-@_command("start_car", {vol.Required("route_id"): str, vol.Required("arrive_at"): str})
-async def ws_start_car(hass, runtime, msg):
-    arrive_at = dt_util.parse_datetime(msg["arrive_at"])
-    if arrive_at is None:
-        raise HomeAssistantError(f"Unreadable time {msg['arrive_at']}")
-    if arrive_at.tzinfo is None:
-        arrive_at = arrive_at.replace(tzinfo=dt_util.get_default_time_zone())
-    await runtime.runs.async_start_car(msg["route_id"], arrive_at)
+@_command("check", {vol.Required("route_id"): str})
+async def ws_check(hass, runtime, msg):
+    return await runtime.runs.async_check_car(msg["route_id"])
 
 
 @_command("cancel", {vol.Required("route_id"): str})
 async def ws_cancel(hass, runtime, msg):
     await runtime.runs.async_cancel(msg["route_id"])
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/timetable",
+        vol.Optional("route_ids"): [str],
+        vol.Optional("count", default=5): vol.All(vol.Coerce(int), vol.Range(min=1, max=20)),
+        vol.Optional("refresh", default=60): vol.All(
+            vol.Coerce(int), vol.Range(min=30, max=300)
+        ),
+    }
+)
+@callback
+def ws_timetable(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Departure boards for the card, now and every `refresh` seconds while it's open."""
+    try:
+        runtime = _runtime(hass)
+    except HomeAssistantError as err:
+        connection.send_error(msg["id"], "not_loaded", str(err))
+        return
+    refresh = timedelta(seconds=msg["refresh"])
+    task: asyncio.Task[None] | None = None
+
+    async def send() -> None:
+        boards = await runtime.timetable.boards(msg.get("route_ids"), msg["count"], refresh)
+        connection.send_message(websocket_api.event_message(msg["id"], {"boards": boards}))
+
+    @callback
+    def update(*_: Any) -> None:
+        nonlocal task
+        if task is None or task.done():
+            task = hass.async_create_background_task(send(), f"{DOMAIN}_timetable")
+
+    unsubs = [
+        async_track_time_interval(hass, update, refresh),
+        async_dispatcher_connect(hass, SIGNAL_DATA_CHANGED, update),
+    ]
+
+    @callback
+    def unsubscribe() -> None:
+        for unsub in unsubs:
+            unsub()
+        if task is not None:
+            task.cancel()
+
+    connection.subscriptions[msg["id"]] = unsubscribe
+    connection.send_result(msg["id"])
+    update()

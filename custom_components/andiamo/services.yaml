@@ -19,6 +19,19 @@ start:
           filter:
             domain: media_player
 
+check:
+  target:
+    entity:
+      integration: andiamo
+      domain: sensor
+  fields:
+    speaker:
+      example: media_player.kitchen
+      selector:
+        entity:
+          filter:
+            domain: media_player
+
 stop:
   target:
     entity:
