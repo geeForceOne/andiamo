@@ -58,7 +58,6 @@ LOCATION = vol.Schema(
         vol.Required("name"): vol.All(str, vol.Length(min=1)),
         vol.Required("latitude"): vol.Coerce(float),
         vol.Required("longitude"): vol.Coerce(float),
-        vol.Optional("main"): bool,
     }
 )
 STATION = vol.Schema(
@@ -68,7 +67,6 @@ STATION = vol.Schema(
         vol.Required("name"): vol.All(str, vol.Length(min=1)),
         vol.Required("stop_ref"): vol.All(str, vol.Length(min=1)),
         vol.Required("walk_minutes"): vol.All(vol.Coerce(int), vol.Range(min=0, max=120)),
-        vol.Optional("main"): bool,
     }
 )
 LINE = vol.Schema(
@@ -117,6 +115,10 @@ ROUTE = vol.Schema(
         vol.Optional("lines", default=list): [LINE],
         vol.Optional("speaker", default=None): _OPTIONAL_STR,
         vol.Optional("announce", default=None): vol.Any(None, vol.In(ANNOUNCE_MODES)),
+        # Car routes: minutes on top of the drive time; None = the setting.
+        vol.Optional("reserve_minutes", default=None): vol.Any(
+            None, vol.All(vol.Coerce(int), vol.Range(min=0, max=120))
+        ),
         vol.Optional("watch_windows", default=list): [WATCH_WINDOW],
         vol.Optional("departure_windows", default=list): [DEPARTURE_WINDOW],
     }
@@ -133,6 +135,7 @@ SETTINGS = vol.Schema(
         vol.Optional("speaker"): _OPTIONAL_STR,
         vol.Optional("language"): vol.In(LANGUAGES),
         vol.Optional("car_lead_minutes"): vol.All(vol.Coerce(int), vol.Range(min=5, max=180)),
+        vol.Optional("car_reserve_minutes"): vol.All(vol.Coerce(int), vol.Range(min=0, max=120)),
         vol.Optional("announce"): vol.In(ANNOUNCE_MODES),
         vol.Optional("limit_tomtom"): vol.All(vol.Coerce(int), vol.Range(min=1)),
         vol.Optional("limit_ojp"): vol.All(vol.Coerce(int), vol.Range(min=1)),

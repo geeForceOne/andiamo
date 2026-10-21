@@ -1,4 +1,4 @@
-"""Places, stations and routes: main flags and what can be deleted."""
+"""Places, stations and routes: what a route needs and what can be deleted."""
 
 from __future__ import annotations
 
@@ -9,55 +9,23 @@ from homeassistant.core import HomeAssistant
 from custom_components.andiamo.store import DataError, AndiamoStore
 
 
-async def test_starts_with_home_as_main(hass: HomeAssistant, store: AndiamoStore) -> None:
+async def test_starts_with_home(hass: HomeAssistant, store: AndiamoStore) -> None:
     assert len(store.locations) == 1
     home = store.locations[0]
-    assert home["main"] is True
+    assert "main" not in home
     assert (home["latitude"], home["longitude"]) == (
         hass.config.latitude,
         hass.config.longitude,
     )
 
 
-async def test_one_main_location(store: AndiamoStore) -> None:
+async def test_route_keeps_a_real_station(store: AndiamoStore) -> None:
     home = store.locations[0]
-    work = await store.async_save_location({"name": "Work", "latitude": 47, "longitude": 8})
-    assert work["main"] is False
+    line = {"key": "10|Flughafen", "name": "10", "destination": "Flughafen"}
+    route = {"name": "To work", "mode": "transit", "origin_id": home["id"], "lines": [line]}
 
-    await store.async_save_location({**work, "main": True})
-    assert [l["main"] for l in store.locations] == [False, True]
-
-    await store.async_delete_location(work["id"])
-    assert home["main"] is True
-
-
-async def test_one_main_station_per_location(store: AndiamoStore) -> None:
-    home = store.locations[0]
-    work = await store.async_save_location({"name": "Work", "latitude": 47, "longitude": 8})
-    tram = await store.async_save_station(
-        {"location_id": home["id"], "name": "Tram", "stop_ref": "a", "walk_minutes": 3}
-    )
-    train = await store.async_save_station(
-        {"location_id": home["id"], "name": "Train", "stop_ref": "b", "walk_minutes": 12}
-    )
-    office = await store.async_save_station(
-        {"location_id": work["id"], "name": "Office", "stop_ref": "c", "walk_minutes": 1}
-    )
-    # The first station of a location becomes its main one.
-    assert (tram["main"], train["main"], office["main"]) == (True, False, True)
-
-    await store.async_save_station({**train, "main": True})
-    assert (tram["main"], train["main"], office["main"]) == (False, True, True)
-    assert store.main_station(home["id"]) is train
-
-
-async def test_route_uses_main_station_unless_set(store: AndiamoStore) -> None:
-    home = store.locations[0]
-    work = await store.async_save_location({"name": "Work", "latitude": 47, "longitude": 8})
-    route = {"name": "To work", "mode": "transit", "origin_id": home["id"]}
-
-    with pytest.raises(DataError, match="no station"):
-        store.route_station(route)
+    with pytest.raises(DataError, match="Add a station to"):
+        await store.async_save_route(route)
 
     tram = await store.async_save_station(
         {"location_id": home["id"], "name": "Tram", "stop_ref": "a", "walk_minutes": 3}
@@ -65,8 +33,31 @@ async def test_route_uses_main_station_unless_set(store: AndiamoStore) -> None:
     train = await store.async_save_station(
         {"location_id": home["id"], "name": "Train", "stop_ref": "b", "walk_minutes": 12}
     )
-    assert store.route_station(route) is tram
-    assert store.route_station({**route, "station_id": train["id"]}) is train
+    # None picked: the first one is stored, and stays when more are added.
+    saved = await store.async_save_route(route)
+    assert saved["station_id"] == tram["id"]
+    assert store.route_station(saved) is tram
+    saved = await store.async_save_route({**saved, "station_id": train["id"]})
+    assert store.route_station(saved) is train
+
+
+async def test_main_station_becomes_the_routes_own(hass: HomeAssistant, store: AndiamoStore) -> None:
+    home = store.locations[0]
+    home["main"] = True
+    store.stations += [
+        {"id": "s1", "location_id": home["id"], "name": "Tram", "stop_ref": "a", "walk_minutes": 3, "main": False},
+        {"id": "s2", "location_id": home["id"], "name": "Train", "stop_ref": "b", "walk_minutes": 9, "main": True},
+    ]
+    store.routes.append(
+        {"id": "r1", "name": "Old", "mode": "transit", "origin_id": home["id"], "station_id": None, "lines": []}
+    )
+    await store.async_save()
+
+    again = AndiamoStore(hass)
+    await again.async_load()
+    # It boarded at the main station, and keeps doing so.
+    assert again.routes[0]["station_id"] == "s2"
+    assert not any("main" in item for item in (*again.locations, *again.stations))
 
 
 async def test_route_checks(store: AndiamoStore) -> None:
@@ -88,6 +79,9 @@ async def test_route_checks(store: AndiamoStore) -> None:
         await store.async_save_route({**transit, "lines": []})
 
     # A public transport route keeps no destination.
+    tram = await store.async_save_station(
+        {"location_id": home["id"], "name": "Tram", "stop_ref": "a", "walk_minutes": 3}
+    )
     saved = await store.async_save_route({**transit, "destination_id": work["id"]})
     assert saved["destination_id"] is None
     await store.async_delete_route(saved["id"])
@@ -98,7 +92,7 @@ async def test_route_checks(store: AndiamoStore) -> None:
 
     await store.async_delete_route(route["id"])
     await store.async_delete_location(work["id"])
-    assert store.stations == []
+    assert store.stations == [tram]
 
 
 async def test_saved_and_loaded(hass: HomeAssistant, store: AndiamoStore) -> None:
@@ -128,7 +122,8 @@ async def test_old_routes_cleaned_on_load(hass: HomeAssistant, store: AndiamoSto
     assert again.routes == [
         {"id": "r1", "name": "Old", "mode": "transit", "origin_id": home["id"],
          "destination_id": None, "station_id": None, "speaker": "media_player.x",
-         "lines": [], "announce": None, "watch_windows": [], "departure_windows": []}
+         "lines": [], "announce": None, "reserve_minutes": None, "watch_windows": [],
+         "departure_windows": []}
     ]
 
 

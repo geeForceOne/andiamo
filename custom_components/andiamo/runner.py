@@ -502,10 +502,12 @@ class CarRun(Run):
         return timedelta(minutes=self.manager.store.settings.get("car_lead_minutes", 30))
 
     async def _departure(self) -> datetime:
+        """When to leave: arriving the reserve minutes early, with traffic at that time."""
+        reserve = timedelta(minutes=self.manager.store.reserve_minutes(self.route))
         trip = await self.manager.car().trip_for_arrival(
             (self.origin["latitude"], self.origin["longitude"]),
             (self.destination["latitude"], self.destination["longitude"]),
-            self.arrive_at,
+            self.arrive_at - reserve,
         )
         await self._remember(trip)
         return trip.departure

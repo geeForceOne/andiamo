@@ -97,7 +97,7 @@ class Client:
 async def test_panel_flow(hass: HomeAssistant, ws, transit) -> None:
     first = await ws.state()
     home = first["locations"][0]
-    assert home["main"] is True
+    assert "main" not in home
     assert first["providers"] == {"transit": True, "car": True}
 
     work = await ws("location/save", item={"name": "Work", "latitude": 47.4, "longitude": 8.5})
@@ -112,13 +112,15 @@ async def test_panel_flow(hass: HomeAssistant, ws, transit) -> None:
         "station/save",
         item={"location_id": home["id"], "name": "Tram", "stop_ref": "x", "walk_minutes": 5},
     )
-    assert station["result"]["main"] is True
+    assert "main" not in station["result"]
 
     route = await ws(
         "route/save",
         item={"name": "Work", "mode": "transit", "origin_id": home["id"], "lines": [{"key": "10|Flughafen", "name": "10", "destination": "Flughafen"}]},
     )
     route = route["result"]
+    # No station picked: the start's first one is stored.
+    assert route["station_id"] == station["result"]["id"]
     await hass.async_block_till_done()
 
     registry = er.async_get(hass)

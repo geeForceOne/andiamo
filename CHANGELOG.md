@@ -10,6 +10,7 @@
 - Departure sensors: in time windows of your choice, a public transport route gets a next departure sensor (short text with "leave in", e.g. for a pixel clock) and a departures sensor with the list.
 - The Andiamo page shows today's API calls, planned from your setup and actually used, against the free daily limits, which can be changed in Settings.
 - Routes can have several watch and departure sensor windows, e.g. weekdays 06:30–08:00 and weekends 09:00–11:00, each with its own alert limit, or its own update interval and number of departures. Windows of a route can't overlap. Existing windows carry over.
+- Car routes can plan a reserve on top of the drive time, e.g. 10 minutes for parking: in Settings for all car routes, or per route.
 - Minor changes and updates.
 
 ## 0.3.0 - 2026-10-19

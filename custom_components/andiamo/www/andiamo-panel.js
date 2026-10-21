@@ -5,11 +5,11 @@ const T = {
   routes: "Routes", places: "Places", settings: "Settings",
   addRoute: "Add route", addPlace: "Add place", addStation: "Add station",
   name: "Name", from: "From", to: "To", mode: "Mode", transit: "Public transport", car: "Car",
-  station: "Station", mainStation: "Main station", speaker: "Speaker",
+  station: "Station", noStationHere: "{0} has no station yet. Add one on the Places tab.", speaker: "Speaker",
   lines: "Lines", pickLine: "Pick a line", loadingLines: "Loading lines…", noLines: "No departures found from this station.",
   walk: "Walk (min)", save: "Save", cancel: "Cancel", delete: "Delete", edit: "Edit",
   start: "Start", stop: "Stop", checkHint: "Drive time and traffic right now", arriveBy: "Arrive by", leaveAt: "Leave at {0}", inMin: "in {0}",
-  main: "Main", makeMain: "Make main", search: "Search", searchStop: "Search a stop…", searchAddress: "Search an address…",
+  search: "Search", searchStop: "Search a stop…", searchAddress: "Search an address…",
   latitude: "Latitude", longitude: "Longitude", useHome: "Use HA home",
   tts: "Text-to-speech", language: "Announcement language", none: "None", min: "min",
   lead: "Car countdown starts", leadHint: "Minutes before leaving",
@@ -32,7 +32,9 @@ const T = {
   keysHint: "API keys: Settings → Devices & services → Andiamo → Reconfigure.",
   deleteConfirm: "Delete {0}? Click again to confirm.", delay: "+{0} min",
   german: "German", english: "English", badTime: "Enter a time like {0}.", badDate: "Enter a date like {0}.",
-  date: "Date", defaultSpeaker: "Default ({0})", drive: "{0} min drive", traffic: "+{0} min traffic", km: "{0} km",
+  date: "Date", defaultSpeaker: "Default ({0})", drive: "{0} min drive", traffic: "+{0} min traffic", reserve: "+{0} min reserve", km: "{0} km",
+  carReserve: "Car reserve", carReserveHint: "Minutes added to the drive time of car routes, e.g. for parking",
+  reserveField: "Reserve (min)",
   messages: "Messages ({0})", messagesHint: "Leave a message empty to use the default. Placeholders:",
   msg_leave_at: "Leave at", msg_changed: "New time", msg_traffic_changed: "Traffic changed",
   msg_minutes_left: "Minutes left", msg_go_now: "Go now", msg_cancelled: "Cancelled", msg_no_connection: "No connection",
@@ -158,12 +160,15 @@ const arrival = (iso) => {
   return ymd === today() ? clock(iso) : `${showDate(ymd)} ${clock(iso)}`;
 };
 // "41 min drive · +3 min traffic · 32 km" from the last car trip planned.
-const driveText = (trip, t) => {
+const driveText = (trip, t, reserve = 0) => {
   if (!trip) return "";
   const km = trip.length_km >= 10 ? Math.round(trip.length_km) : trip.length_km;
-  return [t("drive", trip.travel_minutes), trip.traffic_minutes > 0 ? t("traffic", trip.traffic_minutes) : "", t("km", km.toLocaleString(haLocale?.language))]
+  return [t("drive", trip.travel_minutes), trip.traffic_minutes > 0 ? t("traffic", trip.traffic_minutes) : "",
+    reserve > 0 ? t("reserve", reserve) : "", t("km", km.toLocaleString(haLocale?.language))]
     .filter(Boolean).join(" · ");
 };
+// Minutes a car route plans on top of the drive time: its own, else the setting.
+const reserveOf = (route, settings) => route.reserve_minutes ?? settings?.car_reserve_minutes ?? 0;
 
 class AndiamoPanel extends HTMLElement {
   constructor() {
@@ -336,12 +341,6 @@ class AndiamoPanel extends HTMLElement {
       }
       case "save-loc": await this._saveLoc(arg); break;
       case "save-station": await this._saveStation(arg); break;
-      case "main-loc": await this._ws("location/save", { item: { ...this._loc(arg), main: true } }); return;
-      case "main-station": {
-        const s = this._data.stations.find((x) => x.id === arg);
-        await this._ws("station/save", { item: { ...s, main: true } });
-        return;
-      }
       case "delete": {
         if (this._confirm !== arg) { this._confirm = arg; break; }
         this._confirm = null;
@@ -385,9 +384,8 @@ class AndiamoPanel extends HTMLElement {
         }
         return r;
       }
-      const main = this._data.locations.find((l) => l.main);
-      const other = this._data.locations.find((l) => !l.main);
-      return { mode: this._data.providers.transit ? "transit" : "car", origin_id: main?.id, destination_id: other?.id, lines: [],
+      const [from, to] = this._data.locations;
+      return { mode: this._data.providers.transit ? "transit" : "car", origin_id: from?.id, destination_id: to?.id, lines: [],
         watch_windows: [], departure_windows: [] };
     }
     if (kind === "loc") return id === "new" ? {} : { ...this._loc(id) };
@@ -422,6 +420,7 @@ class AndiamoPanel extends HTMLElement {
       lines: transit ? r.lines || [] : [],
       speaker: r.speaker || null,
       announce: r.announce || null,
+      reserve_minutes: !transit && String(r.reserve_minutes ?? "").trim() !== "" ? Number(r.reserve_minutes) : null,
     };
     for (const list of Object.keys(WINDOWS)) {
       item[list] = [];
@@ -555,7 +554,7 @@ class AndiamoPanel extends HTMLElement {
       where = `${esc(from)}${s ? ` · ${esc(s.name)}` : ""} · ${lines ? esc(lines) : `<span class="late">${this._t("pickLine")}</span>`}`;
     } else {
       // The name already says where; show how long the drive is instead.
-      where = esc(driveText(this._data.trips?.[r.id], (k, v) => this._t(k, v)));
+      where = esc(driveText(this._data.trips?.[r.id], (k, v) => this._t(k, v), reserveOf(r, this._data.settings)));
     }
     // Car routes: check the drive time now, right before Start or Stop.
     const check = r.mode === "car"
@@ -598,19 +597,24 @@ class AndiamoPanel extends HTMLElement {
     const modes = [["transit", this._t("transit")], ["car", this._t("car")]];
     let where;
     if (transit) {
-      const stations = [["", this._t("mainStation")], ...this._stationsOf(r.origin_id).map((s) => [s.id, `${s.name} (${s.walk_minutes}′)`])];
-      where = `
-        <label>${this._t("station")} ${this._select(key, "station_id", stations)}</label>
-        <div class="wide"><div class="muted">${this._t("lines")}</div>${this._lineChecks(key)}</div>`;
+      const own = this._stationsOf(r.origin_id);
+      // Always a real station of the start: the first one until another is picked.
+      if (!own.some((s) => s.id === r.station_id)) { r.station_id = own[0]?.id ?? null; r.lines = []; }
+      where = own.length ? `
+        <label>${this._t("station")} ${this._select(key, "station_id", own.map((s) => [s.id, `${s.name} (${s.walk_minutes}′)`]))}</label>
+        <div class="wide"><div class="muted">${this._t("lines")}</div>${this._lineChecks(key)}</div>`
+        : `<div class="wide muted">${esc(this._t("noStationHere", this._loc(r.origin_id)?.name ?? ""))}</div>`;
     } else {
-      where = `<label>${this._t("to")} ${this._select(key, "destination_id", places)}</label>`;
+      where = `<label>${this._t("to")} ${this._select(key, "destination_id", places)}</label>
+        <label>${this._t("reserveField")} ${this._input(key, "reserve_minutes",
+          `type="number" min="0" max="120" placeholder="${esc(this._t("defaultSpeaker", this._data.settings.car_reserve_minutes ?? 0))}"`)}</label>`;
     }
     const settings = this._data.settings.speaker;
     const fallback = settings ? this._hass.states[settings]?.attributes.friendly_name || settings : this._t("none");
     const speakers = [["", this._t("defaultSpeaker", fallback)], ...this._entities("media_player")];
     const announceDefault = this._t(`announce_${this._data.settings.announce || "speaker"}`);
     const number = (path, label, min, max) => `<label>${this._t(label)} ${this._input(key, path, `type="number" min="${min}" max="${max}"`)}</label>`;
-    const ready = !transit || r.lines?.length;
+    const ready = !transit || (r.station_id && r.lines?.length);
     return `
       <div class="form route">
         ${this._group(this._t("sectionRoute"), "", `<div class="fields">
@@ -662,8 +666,7 @@ class AndiamoPanel extends HTMLElement {
   }
 
   _routeStation(r) {
-    return r.station_id ? this._data.stations.find((x) => x.id === r.station_id)
-      : this._stationsOf(r.origin_id).find((x) => x.main);
+    return this._data.stations.find((x) => x.id === r.station_id);
   }
 
   _routeName(r) {
@@ -720,11 +723,10 @@ class AndiamoPanel extends HTMLElement {
     const head = this._drafts[key] ? this._placeForm(key) : `
       <div class="row">
         <div class="grow clickable" data-action="open" data-arg="${key}" title="${this._t("edit")}">
-          <div class="title">📍 ${esc(l.name)} ${l.main ? `<span class="badge">${this._t("main")}</span>` : ""}</div>
+          <div class="title">📍 ${esc(l.name)}</div>
           <div class="muted">${l.latitude.toFixed(5)}, ${l.longitude.toFixed(5)}</div>
         </div>
         <div class="actions">
-          ${l.main ? "" : `<button class="ghost" data-action="main-loc" data-arg="${l.id}">${this._t("makeMain")}</button>`}
           ${this._deleteBtn(`location:${l.id}`, l.name)}
         </div>
       </div>`;
@@ -732,10 +734,8 @@ class AndiamoPanel extends HTMLElement {
       <div class="row sub">
         <div class="grow clickable" data-action="open" data-arg="station:${s.id}" title="${this._t("edit")}">
           🚏 ${esc(s.name)} <span class="muted">· ${this._t("walk")}: ${s.walk_minutes}</span>
-          ${s.main ? `<span class="badge">${this._t("main")}</span>` : ""}
         </div>
         <div class="actions">
-          ${s.main ? "" : `<button class="ghost" data-action="main-station" data-arg="${s.id}">${this._t("makeMain")}</button>`}
           ${this._deleteBtn(`station:${s.id}`, s.name)}
         </div>
       </div>`).join("");
@@ -810,6 +810,7 @@ class AndiamoPanel extends HTMLElement {
           <option value="en" ${s.language === "en" ? "selected" : ""}>${this._t("english")}</option>
         </select>`)}
         ${row(this._t("lead"), this._t("leadHint"), `<input type="number" min="5" max="180" step="5" data-setting="car_lead_minutes" value="${s.car_lead_minutes}"> ${this._t("min")}`)}
+        ${row(this._t("carReserve"), this._t("carReserveHint"), `<input type="number" min="0" max="120" data-setting="car_reserve_minutes" value="${s.car_reserve_minutes ?? 0}"> ${this._t("min")}`)}
         ${row(this._t("announceOn"), this._t("announceHint"), `<select data-setting="announce">${ANNOUNCE
           .map((a) => `<option value="${a}" ${a === s.announce ? "selected" : ""}>${this._t(`announce_${a}`)}</option>`).join("")}</select>`)}
         ${row(this._t("limitTomtom"), this._t("limitHint"), `<input type="number" min="1" step="100" data-setting="limit_tomtom" value="${s.limit_tomtom}">`)}
@@ -857,7 +858,6 @@ const STYLE = `
   .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .run { font-weight: 500; }
   .late { color: var(--error-color); }
-  .badge { font-size: 0.75em; padding: 1px 6px; border-radius: 8px; background: var(--primary-color); color: var(--text-primary-color); margin-left: 6px; }
   button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--divider-color); background: none;
     color: var(--primary-text-color); cursor: pointer; }
   button.primary { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color); }

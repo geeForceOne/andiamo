@@ -7,7 +7,7 @@
 Andiamo (Italian for *"let's go!"*) is a Home Assistant integration that tells you, out loud on your speaker, exactly when to leave the house: to catch your bus, tram or train, or to arrive somewhere by car on time.
 
 - **Public transport (Switzerland):** press one button and your speaker says *"You need to leave at 10:15, that is in 7 minutes."*, then *"2 minutes left"* and *"Go now!"*. Andiamo knows how long you walk to your stop and which lines you take, follows real-time delays, and announces a new time if yours moves. Too late for the next train, bus or tram? It quietly picks the one after. Press again to cancel.
-- **Car:** set "arrive by 19:00" on the dashboard card. From 30 minutes before you need to leave, the speaker counts down every 5 minutes (*"You have 25 minutes left"*) and ends with *"Go now!"*. Live traffic is followed all the way, so a jam on the way means an earlier "go".
+- **Car:** set "arrive by 19:00" on the dashboard card. From 30 minutes before you need to leave, the speaker counts down every 5 minutes (*"You have 25 minutes left"*) and ends with *"Go now!"*. Live traffic is followed all the way, so a jam on the way means an earlier "go". Need a few minutes for parking? Add a **reserve**: with a 30-minute drive and 10 minutes reserve, Andiamo plans 40 minutes.
 
 Everything is set up on one sidebar page, no YAML. Announcements are in German (default) or English.
 
@@ -23,9 +23,9 @@ Everything is set up on one sidebar page, no YAML. Announcements are in German (
 
 ![Places tab with stations and a station search](docs/screenshots/places.png)
 
-**Settings:** speaker, language, where announcements go, and your own announcement texts.
+**Settings:** speaker, language, where announcements go, the daily API limits, and your own announcement texts. The line under the tabs shows today's API calls.
 
-![Settings tab with the message templates](docs/screenshots/settings.png)
+![Settings tab with API limits and the message templates](docs/screenshots/settings.png)
 
 **Dashboard card:** start routes, set "arrive by" for the car, check the drive time right now (car-and-clock button), and see watchdog problems. Without the date, the car row stays on one line.
 
@@ -72,10 +72,10 @@ Then: Settings → Devices & services → Add integration → **Andiamo**, and e
 
 Open **Andiamo** in the sidebar.
 
-1. **Places:** your home is there already as the main place. Add more places (e.g. *Office*, *Climbing gym*) by address search or coordinates.
-2. **Stations:** under a place, search for a stop and set how many minutes you walk there. The first one is the main station; any station can be made main.
-3. **Routes:** a public transport route boards at a station (the main one unless you pick another) and takes the lines you tick, e.g. *10 → Zürich Flughafen*; the form lists the lines leaving that station. A car route goes from one place to another, e.g. *Home → Climbing gym*. Every route announces on the speaker from Settings, unless you pick another one for it. A route can also be **watched** on chosen days and times (see below).
-4. **Settings:** text-to-speech entity, speaker, language, when the car countdown starts, and **Announce on**: *Speaker*, *Notification* (good for testing) or *Off* (nothing is said; use the sensor and the event in your own automations). Each route can choose its own.
+1. **Places:** your home is there already (from Home Assistant's home location). Add more places (e.g. *Office*, *Climbing gym*) by address search or coordinates.
+2. **Stations:** under a place, search for a stop and set how many minutes you walk there. A place can have several stations, e.g. a tram stop and the train station.
+3. **Routes:** a public transport route boards at a station of its place (the first one is picked; choose another in the list) and takes the lines you tick, e.g. *10 → Zürich Flughafen*; the form lists the lines leaving that station. A car route goes from one place to another, e.g. *Home → Climbing gym*. Every route announces on the speaker from Settings, unless you pick another one for it. The route form has four parts: **Route**, **Announcements**, **Watch** (see [Watchdog](#watchdog)) and, for public transport, **Departure sensors** (see [Departure sensors](#departure-sensors)). Watch and departure sensors take one or more time windows each; **+ Add window** adds one, ✕ removes it.
+4. **Settings:** text-to-speech entity, speaker, language, when the car countdown starts, the **Car reserve** (minutes added to every car route's drive time, default 0; a car route can set its own in its form), and **Announce on**: *Speaker*, *Notification* (good for testing) or *Off* (nothing is said; use the sensor and the event in your own automations). Each route can choose its own. Also here: the daily API limits (see [API usage](#api-usage)) and your own messages (see [Your own messages](#your-own-messages)).
 
 ## Use
 
@@ -96,6 +96,7 @@ Open **Andiamo** in the sidebar.
   - **Timetable:** the next departures of your public transport routes, on the lines you ticked: line, destination, departure time with delay or cancellation, and when to leave, counting the walk to the station. Choose how many departures per route (default 5) and how often they refresh (30 seconds to 5 minutes, default 1 minute). Departures are only fetched while a card shows them, and cards showing the same station share one request.
 
   In YAML: `type: custom:andiamo-card` with optional `title`, `view` (`routes` or `timetable`), `mode` (`car` or `transit`), `routes` (names or ids), `show_date`, `departures` and `refresh` (seconds).
+- While a route runs, the panel and the card show the countdown first, then the leave time, e.g. *in 1 h 5 min · Leave at 17:20 · Arrive by 18:30*. From an hour on, countdowns read hours and minutes.
 - Each route has a sensor (`sensor.andiamo_…`) with the leave time while a countdown runs.
 - **Check a car route now:** the car-and-clock button in the panel and the card, the button entity (e.g. `button.andiamo_home_office_check`) or the `andiamo.check` action gets the drive time and traffic delay right now. It's said on the speaker when *Announce on* is Speaker, and always updates the route's drive time sensor (e.g. `sensor.andiamo_home_office_drive_time`): minutes as the state, with `traffic_minutes`, `length_km`, `message` and `checked_at` attributes. Each check is one TomTom request. The action also answers with the same data:
 
@@ -153,6 +154,21 @@ The Andiamo page shows today's API calls under its tabs, e.g. *TomTom: planned 3
 - **Used:** the calls Andiamo made since midnight UTC, also for countdowns, checks, searches and open timetable cards. Other apps using the same key aren't counted.
 
 The limits are the free ones; change them in Settings for another plan.
+
+### Your own messages
+
+Settings → **Messages** lists every announcement in the chosen language. Type your own text to replace one; leave it empty for the default. Placeholders:
+
+| Placeholder | What it is | In |
+| --- | --- | --- |
+| `{time}` | the leave time, e.g. 17:20 | countdown messages |
+| `{minutes}` | minutes as words, e.g. *7 Minuten* | countdown and drive time messages |
+| `{route}` | the route's name | all |
+| `{line}`, `{destination}`, `{departure}` | the line, where it goes, when it leaves | public transport countdowns |
+| `{destination}` | the place you drive to | drive time messages |
+| `{traffic}`, `{km}` | traffic delay as words, distance | drive time messages |
+
+An unknown placeholder (e.g. a typo like `{tme}`) is refused when you save.
 
 ### Announcements as data
 

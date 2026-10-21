@@ -17,7 +17,7 @@ const T = {
   badTime: "Enter a time like {0}.", badDate: "Enter a date like {0}.", date: "Date",
   leaveIn: "leave in {0}", leaveNow: "leave now", cancelled: "cancelled", walk: "{0} min walk",
   noDepartures: "No departures soon.", noTransit: "No public transport routes. Add them on the Andiamo page.",
-  drive: "{0} min drive", traffic: "+{0} min traffic", km: "{0} km",
+  drive: "{0} min drive", traffic: "+{0} min traffic", reserve: "+{0} min reserve", km: "{0} km",
   problem_traffic: "Traffic jam +{0} min", problem_delayed: "{1} {2} late +{0} min", problem_cancelled: "{1} {2} cancelled",
 };
 
@@ -117,12 +117,15 @@ const arrival = (iso) => {
 };
 
 // "41 min drive · +3 min traffic · 32 km" from the last car trip planned or checked.
-const driveText = (trip, t) => {
+const driveText = (trip, t, reserve = 0) => {
   if (!trip) return "";
   const km = trip.length_km >= 10 ? Math.round(trip.length_km) : trip.length_km;
-  return [t("drive", trip.travel_minutes), trip.traffic_minutes > 0 ? t("traffic", trip.traffic_minutes) : "", t("km", km.toLocaleString(haLocale?.language))]
+  return [t("drive", trip.travel_minutes), trip.traffic_minutes > 0 ? t("traffic", trip.traffic_minutes) : "",
+    reserve > 0 ? t("reserve", reserve) : "", t("km", km.toLocaleString(haLocale?.language))]
     .filter(Boolean).join(" · ");
 };
+// Minutes a car route plans on top of the drive time: its own, else the setting.
+const reserveOf = (route, settings) => route.reserve_minutes ?? settings?.car_reserve_minutes ?? 0;
 
 const DEFAULTS = { view: "routes", show_date: true, departures: 5, refresh: 60 };
 
@@ -315,7 +318,7 @@ class AndiamoCard extends HTMLElement {
         ${date}${check}<button class="primary" data-action="start-car" data-route="${r.id}">${this._t("start")}</button>`;
     }
     if (r.mode === "car") {
-      const drive = driveText(this._data.trips?.[r.id], (k, v) => this._t(k, v));
+      const drive = driveText(this._data.trips?.[r.id], (k, v) => this._t(k, v), reserveOf(r, this._data.settings));
       if (drive && !run) info = `<div class="muted">${esc(drive)}</div>`;
     }
     const p = this._data.problems?.[r.id];

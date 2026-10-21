@@ -56,11 +56,14 @@ class FakeCar(CarProvider):
     def __init__(self) -> None:
         self.departure: datetime | None = None
         self.calls = 0
+        # The arrival times asked for.
+        self.arrivals: list[datetime] = []
         # Leaving now: (travel seconds, traffic delay seconds).
         self.now = (1800, 0)
 
     async def trip_for_arrival(self, origin, destination, arrive_at):
         self.calls += 1
+        self.arrivals.append(arrive_at)
         assert self.departure is not None
         return Trip(self.departure, 2460, 180, 32411)
 

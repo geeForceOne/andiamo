@@ -231,6 +231,23 @@ async def test_car_countdown(
     assert store.car_runs == {}
 
 
+async def test_car_reserve(
+    hass: HomeAssistant, runs: RunManager, store, routes, car
+) -> None:
+    car.departure = at(80)
+    # The setting: plan to arrive 10 minutes early.
+    store.settings["car_reserve_minutes"] = 10
+    await runs.async_start_car(routes["car"]["id"], at(120))
+    assert car.arrivals[-1] == at(110)
+    await runs.async_cancel(routes["car"]["id"], say=False)
+
+    # The route's own reserve wins, also when it's 0.
+    routes["car"]["reserve_minutes"] = 0
+    await runs.async_start_car(routes["car"]["id"], at(120))
+    assert car.arrivals[-1] == at(120)
+    await runs.async_cancel(routes["car"]["id"], say=False)
+
+
 async def test_car_checks_rarely_when_far(
     hass: HomeAssistant, runs: RunManager, routes, car, clock
 ) -> None:

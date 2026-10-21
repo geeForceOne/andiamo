@@ -34,6 +34,8 @@ MODE_CAR: Final = "car"
 DEFAULT_LANGUAGE: Final = "de"
 LANGUAGES: Final = ("de", "en")
 DEFAULT_CAR_LEAD_MINUTES: Final = 30
+# Minutes added to a car route's drive time, e.g. for parking.
+DEFAULT_CAR_RESERVE_MINUTES: Final = 0
 
 # Where announcements go: said on the speaker, shown as a notification, or nowhere
 # (then only the sensor and the event carry them).
