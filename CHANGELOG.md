@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1 - 2026-10-22
+
+### Changed
+
+- On a phone, the route list on the Andiamo page is compact: one line per route with Start on the right, "Arrive by" and the date only after tapping Start, and Delete inside the route's edit form.
+
+### Fixed
+
+- Adding the Andiamo card to a dashboard no longer gets stuck on a spinning wheel.
+
 ## 0.4.0 - 2026-10-21
 
 ### New

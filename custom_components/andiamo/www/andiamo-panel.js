@@ -179,6 +179,8 @@ class AndiamoPanel extends HTMLElement {
     this._search = {};
     this._lines = {};
     this._confirm = null;
+    // On a phone, car routes whose "Arrive by" fields were opened with Start.
+    this._shown = new Set();
     this._error = "";
     this._data = null;
     this.shadowRoot.addEventListener("click", (e) => this._onClick(e));
@@ -194,7 +196,11 @@ class AndiamoPanel extends HTMLElement {
     if (first) this._subscribe();
   }
 
-  set narrow(v) { this._narrow = v; }
+  set narrow(v) {
+    if (this._narrow === v) return;
+    this._narrow = v;
+    if (this._data) this._render();
+  }
   set panel(v) {}
   set route(v) {}
 
@@ -300,6 +306,12 @@ class AndiamoPanel extends HTMLElement {
       case "start": await this._ws("start", { route_id: arg }); return;
       case "check": await this._ws("check", { route_id: arg }); return;
       case "cancel-run": await this._ws("cancel", { route_id: arg }); return;
+      case "show-start": {
+        this._shown.add(arg);
+        this._render();
+        this.shadowRoot.querySelector(`[data-draft="start:${arg}|time"]`)?.focus();
+        return;
+      }
       case "start-car": {
         const typed = d[`start:${arg}`]?.time;
         if (!typed) return;
@@ -309,6 +321,7 @@ class AndiamoPanel extends HTMLElement {
         if (!date) { this._error = this._t("badDate", showDate(today())); break; }
         await this._ws("start", { route_id: arg, arrive_at: arriveAt(time, date) });
         delete d[`start:${arg}`];
+        this._shown.delete(arg);
         return;
       }
       case "save-route": await this._saveRoute(arg); break;
@@ -346,6 +359,7 @@ class AndiamoPanel extends HTMLElement {
         this._confirm = null;
         const [kind, id] = arg.split(":");
         await this._ws(`${kind}/delete`, { item_id: id });
+        delete d[arg];
         return;
       }
       case "pick-stop": {
@@ -528,9 +542,9 @@ class AndiamoPanel extends HTMLElement {
       .join("")}</select>`;
   }
 
-  _deleteBtn(arg, label) {
+  _deleteBtn(arg, label, text = "✕") {
     const confirming = this._confirm === arg;
-    return `<button class="ghost danger" data-action="delete" data-arg="${arg}" title="${esc(confirming ? this._t("deleteConfirm", label) : this._t("delete"))}">${confirming ? this._t("deleteConfirm", esc(label)) : "✕"}</button>`;
+    return `<button class="ghost danger" data-action="delete" data-arg="${arg}" title="${esc(confirming ? this._t("deleteConfirm", label) : this._t("delete"))}">${confirming ? this._t("deleteConfirm", esc(label)) : text}</button>`;
   }
 
   _routes() {
@@ -560,15 +574,22 @@ class AndiamoPanel extends HTMLElement {
     const check = r.mode === "car"
       ? `<button class="icon" data-action="check" data-arg="${r.id}" title="${this._t("checkHint")}" aria-label="${this._t("checkHint")}" ${this._data.providers.car ? "" : "disabled"}><ha-icon icon="mdi:car-clock"></ha-icon></button>`
       : "";
+    // On a phone the row stays one line: the run moves under the name, "Arrive by" waits for a tap on Start,
+    // and Delete moves into the edit form.
+    const compact = this._narrow;
     let action;
+    let runText = "";
     if (run) {
       const delay = run.delay_minutes ? ` <span class="late">${this._t("delay", run.delay_minutes)}</span>` : "";
       const line = run.line ? ` · ${esc(run.line)} ${run.departure ? clock(run.departure) : ""}${delay}`
         : run.arrive_at ? ` · ${this._t("arriveBy")} ${esc(arrival(run.arrive_at))}` : "";
-      action = `<span class="run">${run.leave_at ? `${this._t("inMin", shortMinutes(minutesUntil(run.leave_at)))} · ${this._t("leaveAt", clock(run.leave_at))}` : this._t("running")}${line}</span>
+      runText = `<span class="run">${run.leave_at ? `${this._t("inMin", shortMinutes(minutesUntil(run.leave_at)))} · ${this._t("leaveAt", clock(run.leave_at))}` : this._t("running")}${line}</span>`;
+      action = `${compact ? "" : runText}
         ${check}<button data-action="cancel-run" data-arg="${r.id}">${this._t("stop")}</button>`;
     } else if (r.mode === "transit") {
       action = `<button class="primary" data-action="start" data-arg="${r.id}" ${this._data.providers.transit && r.lines?.length ? "" : "disabled"}>${this._t("start")}</button>`;
+    } else if (compact && !this._shown.has(r.id)) {
+      action = `${check}<button class="primary" data-action="show-start" data-arg="${r.id}" ${this._data.providers.car ? "" : "disabled"}>${this._t("start")}</button>`;
     } else {
       const key = `start:${r.id}`;
       const date = this._drafts[key]?.date ?? showDate(today());
@@ -580,13 +601,14 @@ class AndiamoPanel extends HTMLElement {
     const watch = problem ? `<div class="late">⚠ ${esc(this._problemText(problem))}</div>`
       : this._data.watching?.includes(r.id) ? `<div class="muted">👁 ${this._t("watching")}</div>` : "";
     return `
-      <div class="row ${run ? "active" : ""}">
+      <div class="row ${run ? "active" : ""} ${compact ? "compact" : ""} ${compact && this._shown.has(r.id) && !run ? "open" : ""}">
         <div class="grow clickable" data-action="open" data-arg="route:${r.id}" title="${this._t("edit")}">
           <div class="title">${icon} ${esc(r.name)}</div>
           ${where ? `<div class="muted">${where}</div>` : ""}
+          ${compact && runText ? `<div>${runText}</div>` : ""}
           ${watch}
         </div>
-        <div class="actions">${action}${this._deleteBtn(`route:${r.id}`, r.name)}</div>
+        <div class="actions">${action}${compact ? "" : this._deleteBtn(`route:${r.id}`, r.name)}</div>
       </div>`;
   }
 
@@ -633,6 +655,7 @@ class AndiamoPanel extends HTMLElement {
         <div class="buttons">
           <button class="primary" data-action="save-route" data-arg="${key}" ${ready ? "" : "disabled"}>${this._t("save")}</button>
           <button data-action="close" data-arg="${key}">${this._t("cancel")}</button>
+          ${this._narrow && r.id ? this._deleteBtn(key, r.name, this._t("delete")) : ""}
         </div>
       </div>`;
   }
@@ -850,6 +873,12 @@ const STYLE = `
   .row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--divider-color); flex-wrap: wrap; }
   .row:last-of-type { border-bottom: none; }
   .row.active .title { color: var(--primary-color); }
+  .row.compact { flex-wrap: nowrap; gap: 8px; }
+  .row.compact.open { flex-wrap: wrap; }
+  .row.compact .grow { min-width: 0; }
+  .row.compact .grow > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row.compact .actions { flex-wrap: nowrap; flex-shrink: 0; }
+  .row.compact.open .actions { flex-wrap: wrap; margin-left: auto; }
   .sub { margin-left: 24px; }
   .grow { flex: 1; min-width: 180px; }
   .clickable { cursor: pointer; }

@@ -369,13 +369,20 @@ class AndiamoCardEditor extends HTMLElement {
   }
 
   // The route list once, for the route picker.
+  // The first event can arrive before the subscription's promise resolves, so unsubscribe through the promise.
   async _load() {
     this._loading = true;
     try {
-      const unsub = await this._hass.connection.subscribeMessage(
-        (data) => { this._routes = data.routes; this._render(); unsub(); },
+      const sub = this._hass.connection.subscribeMessage(
+        (data) => {
+          if (this._routes) return;
+          this._routes = data.routes;
+          this._render();
+          sub.then((unsub) => unsub()).catch(() => {});
+        },
         { type: "andiamo/subscribe" },
       );
+      await sub;
     } catch (err) {
       this._routes = [];
       this._render();
