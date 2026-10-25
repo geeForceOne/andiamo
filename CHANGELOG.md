@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0 - 2026-10-25
+
+### New
+
+- Andiamo is now in the default HACS list: search for Andiamo in HACS and download it, no custom repository needed.
+
+### Fixed
+
+- The Andiamo card shows up on phones again. On some browsers it went missing and the dashboard showed an error in its place.
+
 ## 0.4.1 - 2026-10-22
 
 ### Changed

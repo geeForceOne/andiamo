@@ -483,8 +483,22 @@ const STYLE = `
   .dep.gone .dest, .dep.gone .time { text-decoration: line-through; color: var(--secondary-text-color); }
 `;
 
-customElements.define("andiamo-card", AndiamoCard);
-customElements.define("andiamo-card-editor", AndiamoCardEditor);
+// In browsers without scoped custom element registries, HA's app.js swaps window.customElements for
+// a polyfill. This file loads at startup and can run before that swap, which loses the definitions.
+// So define again on whatever registry is current, for the first minute.
+const define = () => {
+  for (const [name, cls] of [["andiamo-card", AndiamoCard], ["andiamo-card-editor", AndiamoCardEditor]]) {
+    try {
+      if (!customElements.get(name)) customElements.define(name, cls);
+    } catch (err) {
+      console.warn("Andiamo: can't define", name, err);
+    }
+  }
+};
+define();
+const redefine = setInterval(define, 500);
+setTimeout(() => clearInterval(redefine), 60000);
+
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "andiamo-card",

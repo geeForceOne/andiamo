@@ -49,18 +49,17 @@ Everything is set up on one sidebar page, no YAML. Announcements are in German (
 
 ## Install
 
-Andiamo isn't in the default HACS list yet, so you add it to HACS as a custom repository first. It takes a minute.
+Andiamo is in the default HACS list.
 
-**HACS, the quick way:** click this button. It opens HACS in your Home Assistant and asks to add Andiamo; click **Add**, then **Download**, and restart Home Assistant.
+**HACS, the quick way:** click this button. It opens Andiamo in HACS in your Home Assistant; click **Download**, then restart Home Assistant.
 
 [![Open your Home Assistant instance and open Andiamo in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=geeForceOne&repository=andiamo&category=integration)
 
 **HACS, by hand:**
 
-1. In Home Assistant, open **HACS**, click **⋮** (top right) → **Custom repositories**.
-2. Paste `https://github.com/geeForceOne/andiamo`, choose the type **Integration** and click **Add**.
-3. Search HACS for **Andiamo**, open it and click **Download**.
-4. Restart Home Assistant.
+1. In Home Assistant, open **HACS** and search for **Andiamo**.
+2. Open it and click **Download**.
+3. Restart Home Assistant.
 
 HACS then tells you about new versions like any other integration.
 
