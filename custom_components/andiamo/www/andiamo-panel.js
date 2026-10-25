@@ -33,6 +33,7 @@ const T = {
   deleteConfirm: "Delete {0}? Click again to confirm.", delay: "+{0} min",
   german: "German", english: "English", badTime: "Enter a time like {0}.", badDate: "Enter a date like {0}.",
   date: "Date", defaultSpeaker: "Default ({0})", drive: "{0} min drive", traffic: "+{0} min traffic", reserve: "+{0} min reserve", km: "{0} km",
+  eta: "ETA {0}", drag: "Drag to sort",
   carReserve: "Car reserve", carReserveHint: "Minutes added to the drive time of car routes, e.g. for parking",
   reserveField: "Reserve (min)",
   messages: "Messages ({0})", messagesHint: "Leave a message empty to use the default. Placeholders:",
@@ -167,6 +168,8 @@ const driveText = (trip, t, reserve = 0) => {
     reserve > 0 ? t("reserve", reserve) : "", t("km", km.toLocaleString(haLocale?.language))]
     .filter(Boolean).join(" · ");
 };
+// When you'd arrive leaving now: "ETA 12:00".
+const etaText = (trip, t) => (trip ? t("eta", clock(new Date(Date.now() + trip.travel_minutes * 60000).toISOString())) : "");
 // Minutes a car route plans on top of the drive time: its own, else the setting.
 const reserveOf = (route, settings) => route.reserve_minutes ?? settings?.car_reserve_minutes ?? 0;
 
@@ -187,6 +190,7 @@ class AndiamoPanel extends HTMLElement {
     this.shadowRoot.addEventListener("input", (e) => this._onInput(e));
     this.shadowRoot.addEventListener("change", (e) => this._onInput(e));
     this.shadowRoot.addEventListener("keydown", (e) => this._onKey(e));
+    this.shadowRoot.addEventListener("pointerdown", (e) => this._dragStart(e));
   }
 
   set hass(hass) {
@@ -295,6 +299,54 @@ class AndiamoPanel extends HTMLElement {
     const el = e.target.closest("[data-action]");
     if (!el) return;
     this._act(el.dataset.action, el.dataset.arg);
+  }
+
+  // Drag a route or place by its handle; the new order saves when it's dropped.
+  _dragStart(e) {
+    const handle = e.target.closest("[data-drag]");
+    if (!handle || e.button) return;
+    e.preventDefault();
+    const list = handle.dataset.drag;
+    const item = handle.closest("[data-item]");
+    const items = () => [...this.shadowRoot.querySelectorAll(`[data-list="${list}"]`)];
+    this._dragging = true;
+    item.classList.add("dragging");
+    const move = (ev) => {
+      const over = items().find((el) => {
+        const r = el.getBoundingClientRect();
+        return el !== item && ev.clientY >= r.top && ev.clientY <= r.bottom;
+      });
+      if (!over) return;
+      const r = over.getBoundingClientRect();
+      over.parentNode.insertBefore(item, ev.clientY < r.top + r.height / 2 ? over : over.nextSibling);
+    };
+    const drop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", drop);
+      window.removeEventListener("pointercancel", drop);
+      this._dragging = false;
+      const moved = items().map((el) => el.dataset.item);
+      // Routes open in the edit form aren't rows; they keep their place.
+      const kind = list === "routes" ? "routes" : "locations";
+      const shown = new Set(moved);
+      const all = this._data[kind];
+      const byId = Object.fromEntries(all.map((x) => [x.id, x]));
+      let next = 0;
+      const ordered = all.map((x) => (shown.has(x.id) ? byId[moved[next++]] : x));
+      if (ordered.some((x, i) => x !== all[i])) {
+        this._data[kind] = ordered;
+        this._ws("reorder", { kind, ids: ordered.map((x) => x.id) }).catch(() => {});
+      }
+      this._render();
+    };
+    // On the window: moving the row in the page would lose a pointer capture on the handle.
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", drop);
+    window.addEventListener("pointercancel", drop);
+  }
+
+  _handle(list, count) {
+    return count > 1 ? `<span class="handle" data-drag="${list}" title="${this._t("drag")}" aria-label="${this._t("drag")}"><ha-icon icon="mdi:drag"></ha-icon></span>` : "";
   }
 
   async _act(action, arg) {
@@ -476,6 +528,8 @@ class AndiamoPanel extends HTMLElement {
   // Rendering
 
   _render() {
+    // Updates wait until a dragged row is dropped.
+    if (this._dragging) return;
     const root = this.shadowRoot;
     const active = root.activeElement;
     const focus = active && (active.dataset.draft || active.dataset.search);
@@ -568,7 +622,10 @@ class AndiamoPanel extends HTMLElement {
       where = `${esc(from)}${s ? ` · ${esc(s.name)}` : ""} · ${lines ? esc(lines) : `<span class="late">${this._t("pickLine")}</span>`}`;
     } else {
       // The name already says where; show how long the drive is instead.
-      where = esc(driveText(this._data.trips?.[r.id], (k, v) => this._t(k, v), reserveOf(r, this._data.settings)));
+      const trip = this._data.trips?.[r.id];
+      where = esc(driveText(trip, (k, v) => this._t(k, v), reserveOf(r, this._data.settings)));
+      // A running route already shows when it arrives.
+      if (trip && !run) where += ` · ${esc(etaText(trip, (k, v) => this._t(k, v)))}`;
     }
     // Car routes: check the drive time now, right before Start or Stop.
     const check = r.mode === "car"
@@ -601,7 +658,8 @@ class AndiamoPanel extends HTMLElement {
     const watch = problem ? `<div class="late">⚠ ${esc(this._problemText(problem))}</div>`
       : this._data.watching?.includes(r.id) ? `<div class="muted">👁 ${this._t("watching")}</div>` : "";
     return `
-      <div class="row ${run ? "active" : ""} ${compact ? "compact" : ""} ${compact && this._shown.has(r.id) && !run ? "open" : ""}">
+      <div class="row ${run ? "active" : ""} ${compact ? "compact" : ""} ${compact && this._shown.has(r.id) && !run ? "open" : ""}" data-item="${r.id}" data-list="routes">
+        ${this._handle("routes", this._data.routes.length)}
         <div class="grow clickable" data-action="open" data-arg="route:${r.id}" title="${this._t("edit")}">
           <div class="title">${icon} ${esc(r.name)}</div>
           ${where ? `<div class="muted">${where}</div>` : ""}
@@ -745,6 +803,7 @@ class AndiamoPanel extends HTMLElement {
     const key = `loc:${l.id}`;
     const head = this._drafts[key] ? this._placeForm(key) : `
       <div class="row">
+        ${this._handle("locations", this._data.locations.length)}
         <div class="grow clickable" data-action="open" data-arg="${key}" title="${this._t("edit")}">
           <div class="title">📍 ${esc(l.name)}</div>
           <div class="muted">${l.latitude.toFixed(5)}, ${l.longitude.toFixed(5)}</div>
@@ -767,7 +826,7 @@ class AndiamoPanel extends HTMLElement {
       ? this._drafts[newKey] ? this._stationForm(newKey)
         : `<button class="add sub" data-action="open" data-arg="${newKey}">+ ${this._t("addStation")}</button>`
       : "";
-    return `<section class="card">${head}${stations}${add}</section>`;
+    return `<section class="card" data-item="${l.id}" data-list="locations">${head}${stations}${add}</section>`;
   }
 
   _searchBox(key, kind) {
@@ -882,6 +941,10 @@ const STYLE = `
   .sub { margin-left: 24px; }
   .grow { flex: 1; min-width: 180px; }
   .clickable { cursor: pointer; }
+  .handle { display: inline-flex; align-self: stretch; align-items: center; color: var(--secondary-text-color); cursor: grab;
+    touch-action: none; --mdc-icon-size: 20px; margin-right: -4px; }
+  .dragging { opacity: 0.6; }
+  .dragging .handle { cursor: grabbing; }
   .title { font-weight: 500; }
   .muted { color: var(--secondary-text-color); font-size: 0.9em; }
   .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

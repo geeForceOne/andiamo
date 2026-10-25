@@ -200,6 +200,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_delete_station,
         ws_save_route,
         ws_delete_route,
+        ws_reorder,
         ws_search_stops,
         ws_search_places,
         ws_lines,
@@ -280,6 +281,11 @@ async def ws_delete_route(hass, runtime, msg):
     await runtime.store.async_delete_route(msg["item_id"])
 
 
+@_command("reorder", {vol.Required("kind"): vol.In(["routes", "locations"]), vol.Required("ids"): [str]})
+async def ws_reorder(hass, runtime, msg):
+    await runtime.store.async_reorder(msg["kind"], msg["ids"])
+
+
 @_command("search_stops", {vol.Required("query"): str})
 async def ws_search_stops(hass, runtime, msg):
     return [asdict(stop) for stop in await runtime.transit().search_stops(msg["query"])]
@@ -335,7 +341,7 @@ async def ws_cancel(hass, runtime, msg):
 def ws_timetable(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Departure boards for the card, now and every `refresh` seconds while it's open."""
+    """Departure boards and car drive times for the card, now and every `refresh` seconds while it's open."""
     try:
         runtime = _runtime(hass)
     except HomeAssistantError as err:

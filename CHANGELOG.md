@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.0 - 2026-10-25
+
+### New
+
+- Sort routes and places on the Andiamo page by dragging them.
+- The card's timetable view also shows car routes: the drive time if you leave now, the distance, a traffic jam if there is one, and the ETA.
+- Car routes in the panel and the card show an ETA next to the drive time.
+- The card shows its routes in the order you pick them; drag them in the card editor to change it.
+
+### Fixed
+
+- Minor fixes and updates.
+
 ## 1.0.0 - 2026-10-25
 
 ### New

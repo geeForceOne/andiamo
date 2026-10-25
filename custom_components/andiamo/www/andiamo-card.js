@@ -1,12 +1,12 @@
 // Andiamo dashboard card: start a route with one tap, or set "arrive by" for a car route.
-// Or, with view: timetable, the next departures of public transport routes.
+// Or, with view: timetable, the next departures of public transport routes and the drive time of car routes.
 // Set it up in the card editor, or in YAML:
 //
 // type: custom:andiamo-card
 // title: Leave      (optional)
 // view: routes       (optional: routes or timetable; default routes)
 // mode: car          (optional, routes view: car or transit; default all routes)
-// routes: [Home → Girlfriend]   (optional: route names or ids)
+// routes: [Home → Girlfriend]   (optional: route names or ids, shown in this order)
 // show_date: false   (optional, routes view: hide the date next to "Arrive by"; default true)
 // departures: 5      (optional, timetable: departures per route, 1–20)
 // refresh: 60        (optional, timetable: seconds between updates, 30–300)
@@ -16,8 +16,9 @@ const T = {
   running: "Running", noRoutes: "No routes. Add them on the Andiamo page.", delay: "+{0} min",
   badTime: "Enter a time like {0}.", badDate: "Enter a date like {0}.", date: "Date",
   leaveIn: "leave in {0}", leaveNow: "leave now", cancelled: "cancelled", walk: "{0} min walk",
-  noDepartures: "No departures soon.", noTransit: "No public transport routes. Add them on the Andiamo page.",
-  drive: "{0} min drive", traffic: "+{0} min traffic", reserve: "+{0} min reserve", km: "{0} km",
+  noDepartures: "No departures soon.",
+  drive: "{0} min drive", traffic: "+{0} min traffic", reserve: "+{0} min reserve", km: "{0} km", eta: "ETA {0}",
+  driveNow: "{0} min", jam: "{0} min traffic jam",
   problem_traffic: "Traffic jam +{0} min", problem_delayed: "{1} {2} late +{0} min", problem_cancelled: "{1} {2} cancelled",
 };
 
@@ -124,6 +125,8 @@ const driveText = (trip, t, reserve = 0) => {
     reserve > 0 ? t("reserve", reserve) : "", t("km", km.toLocaleString(haLocale?.language))]
     .filter(Boolean).join(" · ");
 };
+// When you'd arrive leaving now: "ETA 12:00".
+const etaText = (trip, t) => (trip ? t("eta", clock(new Date(Date.now() + trip.travel_minutes * 60000).toISOString())) : "");
 // Minutes a car route plans on top of the drive time: its own, else the setting.
 const reserveOf = (route, settings) => route.reserve_minutes ?? settings?.car_reserve_minutes ?? 0;
 
@@ -238,10 +241,13 @@ class AndiamoCard extends HTMLElement {
   _routes() {
     if (!this._data) return null;
     const c = this._config || {};
-    const mode = this._timetable ? "transit" : c.mode;
-    return this._data.routes.filter(
-      (r) => (!mode || r.mode === mode) && (!c.routes?.length || c.routes.includes(r.name) || c.routes.includes(r.id)),
-    );
+    const mode = this._timetable ? "" : c.mode;
+    const picked = c.routes || [];
+    // Picked routes show in the order they were picked; otherwise in the panel's order.
+    const at = (r) => { const i = picked.indexOf(r.id); return i >= 0 ? i : picked.indexOf(r.name); };
+    return this._data.routes
+      .filter((r) => (!mode || r.mode === mode) && (!picked.length || at(r) >= 0))
+      .sort((a, b) => at(a) - at(b));
   }
 
   async _act(action, routeId) {
@@ -284,7 +290,7 @@ class AndiamoCard extends HTMLElement {
     let body;
     if (this._error && !this._data) body = `<p class="muted">${esc(this._error)}</p>`;
     else if (!routes) body = `<p class="muted">…</p>`;
-    else if (!routes.length) body = `<p class="muted">${this._t(this._timetable ? "noTransit" : "noRoutes")}</p>`;
+    else if (!routes.length) body = `<p class="muted">${this._t("noRoutes")}</p>`;
     else if (this._timetable) body = this._boards ? this._boards.map((b) => this._board(b)).join("") : `<p class="muted">…</p>`;
     else body = routes.map((r) => this._row(r)).join("");
     this.shadowRoot.innerHTML = `<style>${STYLE}</style><ha-card>${title}<div class="content">
@@ -319,7 +325,8 @@ class AndiamoCard extends HTMLElement {
     }
     if (r.mode === "car") {
       const drive = driveText(this._data.trips?.[r.id], (k, v) => this._t(k, v), reserveOf(r, this._data.settings));
-      if (drive && !run) info = `<div class="muted">${esc(drive)}</div>`;
+      const trip = this._data.trips?.[r.id];
+      if (drive && !run) info = `<div class="muted">${esc(drive)} · ${esc(etaText(trip, (k, v) => this._t(k, v)))}</div>`;
     }
     const p = this._data.problems?.[r.id];
     const problem = p ? `<div class="late">⚠ ${esc(this._t(`problem_${p.reason}`, p.delay_minutes, p.line || "", p.departure ? clock(p.departure) : ""))}</div>` : "";
@@ -328,8 +335,26 @@ class AndiamoCard extends HTMLElement {
       <div class="actions">${right}</div></div>`;
   }
 
+  // A car route's drive time leaving now: "25 min · 32 km · 4 min traffic jam · ETA 12:00".
+  _driveBoard(b) {
+    const t = (k, v) => this._t(k, v);
+    let text;
+    if (b.error && b.travel_minutes === undefined) text = esc(b.error);
+    else if (b.travel_minutes === undefined) text = "…";
+    else {
+      const km = b.length_km >= 10 ? Math.round(b.length_km) : b.length_km;
+      text = [t("driveNow", b.travel_minutes), t("km", km.toLocaleString(haLocale?.language)),
+        b.traffic_minutes > 0 ? `<span class="late">${t("jam", b.traffic_minutes)}</span>` : "",
+        `<span class="run">${etaText(b, t)}</span>`].filter(Boolean).join(" · ");
+    }
+    return `<div class="board">
+      <div class="name">🚗 ${esc(b.name)}</div>
+      <div class="drive">${text}</div></div>`;
+  }
+
   // One route's next departures; the ones whose leave time has passed drop out between refreshes.
   _board(b) {
+    if (b.mode === "car") return this._driveBoard(b);
     const route = this._data.routes.find((r) => r.id === b.route_id);
     const where = b.station ? `${esc(b.station)}${b.walk_minutes ? ` · ${this._t("walk", b.walk_minutes)}` : ""}` : "";
     const now = Date.now();
@@ -391,15 +416,15 @@ class AndiamoCardEditor extends HTMLElement {
 
   _schema(c) {
     const timetable = c.view === "timetable";
-    const mode = timetable ? "transit" : c.mode;
+    const mode = timetable ? "" : c.mode;
     const routes = (this._routes || []).filter((r) => !mode || r.mode === mode).map((r) => ({ value: r.id, label: r.name }));
     return [
       { name: "title", selector: { text: {} } },
       { name: "view", selector: { select: { mode: "dropdown", options: [
-        { value: "routes", label: "Routes (start and stop)" }, { value: "timetable", label: "Timetable (public transport)" }] } } },
+        { value: "routes", label: "Routes (start and stop)" }, { value: "timetable", label: "Timetable (departures and drive times)" }] } } },
       ...(timetable ? [] : [{ name: "mode", selector: { select: { mode: "dropdown", options: [
         { value: "", label: "All" }, { value: "transit", label: "Public transport" }, { value: "car", label: "Car" }] } } }]),
-      { name: "routes", selector: { select: { multiple: true, options: routes } } },
+      { name: "routes", selector: { select: { multiple: true, reorder: true, options: routes } } },
       ...(timetable
         ? [
           { name: "departures", selector: { number: { min: 1, max: 20, mode: "box" } } },
@@ -445,7 +470,7 @@ const LABELS = {
   departures: "Departures per route", refresh: "Refresh every",
 };
 const HELPERS = {
-  routes: "None picked: all of them.",
+  routes: "None picked: all of them. Drag to change the order.",
   show_date: "Off: today, or tomorrow once the time has passed.",
 };
 
@@ -474,6 +499,7 @@ const STYLE = `
   .board { padding: 8px 0; border-bottom: 1px solid var(--divider-color); }
   .board:last-child { border-bottom: none; }
   .board .name { margin-bottom: 2px; }
+  .drive { padding: 4px 0; }
   .dep { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; }
   .dep .line { min-width: 2.5em; padding: 0 6px; border-radius: 4px; text-align: center; font-weight: 500;
     background: var(--secondary-background-color); }

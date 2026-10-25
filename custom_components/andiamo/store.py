@@ -227,6 +227,15 @@ class AndiamoStore:
         self.trips.pop(route_id, None)
         await self.async_save()
 
+    async def async_reorder(self, kind: str, ids: list[str]) -> None:
+        """Put routes or locations in the order the user dragged them into.
+
+        Ids that aren't listed keep their order after the listed ones."""
+        items = self.routes if kind == "routes" else self.locations
+        place = {item_id: i for i, item_id in enumerate(ids)}
+        items.sort(key=lambda item: place.get(item["id"], len(ids)))
+        await self.async_save()
+
     def _old_route(self, item: dict[str, Any]) -> dict[str, Any]:
         return next((r for r in self.routes if r["id"] == item.get("id")), {})
 

@@ -1,4 +1,4 @@
-<img src="custom_components/andiamo/brand/icon.png" alt="" width="96" align="right">
+<img src="https://raw.githubusercontent.com/geeForceOne/andiamo/main/custom_components/andiamo/brand/icon.png" alt="" width="96" align="right">
 
 # Andiamo
 
@@ -29,12 +29,12 @@ Everything is set up on one sidebar page, no YAML. Announcements are in German (
 
 **Dashboard card:** start routes, set "arrive by" for the car, check the drive time right now (car-and-clock button), and see watchdog problems. Without the date, the car row stays on one line.
 
-<img src="docs/screenshots/card.png" alt="Andiamo card with routes and a car route's time, date and check button" width="420">
-<img src="docs/screenshots/card-car.png" alt="Andiamo card for car routes without the date" width="420">
+<img src="https://raw.githubusercontent.com/geeForceOne/andiamo/main/docs/screenshots/card.png" alt="Andiamo card with routes and a car route's time, date and check button" width="420">
+<img src="https://raw.githubusercontent.com/geeForceOne/andiamo/main/docs/screenshots/card-car.png" alt="Andiamo card for car routes without the date" width="560">
 
-**Timetable:** the next departures on your lines, with delays and when to leave, counting the walk to the station.
+**Timetable:** the next departures on your lines, with delays and when to leave, counting the walk to the station, and for car routes the drive time, traffic jam and ETA if you leave now.
 
-<img src="docs/screenshots/card-timetable.png" alt="Andiamo card in timetable view" width="420">
+<img src="https://raw.githubusercontent.com/geeForceOne/andiamo/main/docs/screenshots/card-timetable.png" alt="Andiamo card in timetable view with a car route" width="420">
 
 **Card editor:** set the card up without YAML.
 
@@ -92,9 +92,13 @@ Open **Andiamo** in the sidebar.
 
 - Add the **Andiamo** card to a dashboard and set it up in the card editor. It shows one of two views:
   - **Routes:** starts and stops routes and sets "arrive by" for car routes. Turn off **Show the date** to hide the date box; the arrival is then today, or tomorrow once the time has passed.
-  - **Timetable:** the next departures of your public transport routes, on the lines you ticked: line, destination, departure time with delay or cancellation, and when to leave, counting the walk to the station. Choose how many departures per route (default 5) and how often they refresh (30 seconds to 5 minutes, default 1 minute). Departures are only fetched while a card shows them, and cards showing the same station share one request.
+  - **Timetable:** the next departures of your public transport routes, on the lines you ticked: line, destination, departure time with delay or cancellation, and when to leave, counting the walk to the station. Car routes show the drive time if you leave now, e.g. *25 min · 32 km · 4 min traffic jam · ETA 12:00* (the traffic jam only when there is one). Choose how many departures per route (default 5) and how often they refresh (30 seconds to 5 minutes, default 1 minute). Departures and drive times are only fetched while a card shows them, and cards showing the same station or car route share one request. At a 1-minute refresh, each car route uses up to 60 TomTom requests an hour while a card is open.
 
-  In YAML: `type: custom:andiamo-card` with optional `title`, `view` (`routes` or `timetable`), `mode` (`car` or `transit`), `routes` (names or ids), `show_date`, `departures` and `refresh` (seconds).
+  Picked routes show in the order you picked them; drag them in the card editor to change it. With none picked, the card shows all routes in the Andiamo page's order.
+
+  In YAML: `type: custom:andiamo-card` with optional `title`, `view` (`routes` or `timetable`), `mode` (`car` or `transit`), `routes` (names or ids, in the order to show), `show_date`, `departures` and `refresh` (seconds).
+- **Sort** routes and places on the Andiamo page by dragging them by the handle on the left.
+- Car routes in the panel and the card show the last known drive time and an **ETA** if you leave now, e.g. *25 min drive · 32 km · ETA 12:00*. It moves on every minute without new requests, so it can be off if the traffic has changed since the last check.
 - While a route runs, the panel and the card show the countdown first, then the leave time, e.g. *in 1 h 5 min · Leave at 17:20 · Arrive by 18:30*. From an hour on, countdowns read hours and minutes.
 - Each route has a sensor (`sensor.andiamo_…`) with the leave time while a countdown runs.
 - **Check a car route now:** the car-and-clock button in the panel and the card, the button entity (e.g. `button.andiamo_home_office_check`) or the `andiamo.check` action gets the drive time and traffic delay right now. It's said on the speaker when *Announce on* is Speaker, and always updates the route's drive time sensor (e.g. `sensor.andiamo_home_office_drive_time`): minutes as the state, with `traffic_minutes`, `length_km`, `message` and `checked_at` attributes. Each check is one TomTom request. The action also answers with the same data:

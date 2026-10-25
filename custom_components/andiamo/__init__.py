@@ -132,7 +132,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: AndiamoConfigEntry) -> b
     )
     runtime.watchdog = Watchdog(hass, store, runtime.transit, runtime.car)
     runtime.usage = Usage(hass, store)
-    runtime.timetable = Timetable(store, runtime.transit)
+    runtime.timetable = Timetable(store, runtime.transit, runtime.car)
     runtime.departures = Departures(hass, store, runtime.timetable)
     entry.runtime_data = runtime
     hass.data[DOMAIN] = runtime

@@ -1,9 +1,10 @@
-"""Departure boards for the timetable card and the departure sensors, fetched only while needed."""
+"""Departure boards and car drive times for the timetable card, and the departure
+sensors, fetched only while needed."""
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 import logging
 from typing import Any
@@ -13,8 +14,9 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dis
 from homeassistant.helpers.event import async_track_time_change
 from homeassistant.util import dt as dt_util
 
-from .const import MODE_TRANSIT, SIGNAL_BOARDS_CHANGED, SIGNAL_DATA_CHANGED
-from .providers import Departure, TransitProvider
+from .const import MODE_CAR, MODE_TRANSIT, SIGNAL_BOARDS_CHANGED, SIGNAL_DATA_CHANGED
+from .providers import CarProvider, Departure, TransitProvider
+from .runner import drive_of
 from .store import AndiamoStore
 from .texts import clock, minutes_until, short_minutes
 from .windows import active
@@ -26,53 +28,89 @@ SLACK = timedelta(seconds=5)
 
 
 class Timetable:
-    """Departures per station, shared by every open card that shows the station."""
+    """Departures per station and drive times per car route, shared by every open card that shows them."""
 
-    def __init__(self, store: AndiamoStore, transit: Callable[[], TransitProvider]) -> None:
+    def __init__(
+        self,
+        store: AndiamoStore,
+        transit: Callable[[], TransitProvider],
+        car: Callable[[], CarProvider],
+    ) -> None:
         self.store = store
         self.transit = transit
-        # {stop_ref: (fetched_at, departures)}
-        self._cache: dict[str, tuple[datetime, list[Departure]]] = {}
-        self._pending: dict[str, asyncio.Future[list[Departure]]] = {}
+        self.car = car
+        # {stop_ref or route id: (fetched_at, departures or drive)}
+        self._cache: dict[str, tuple[datetime, Any]] = {}
+        self._pending: dict[str, asyncio.Future[Any]] = {}
 
-    async def departures(self, stop_ref: str, max_age: timedelta) -> list[Departure]:
-        """The station's departures, from a call another card made just before if there was one."""
-        cached = self._cache.get(stop_ref)
+    async def _shared(self, key: str, max_age: timedelta, fetch: Callable[[], Awaitable[Any]]) -> Any:
+        """What `fetch` returns, from a call another card made just before if there was one."""
+        cached = self._cache.get(key)
         if cached and dt_util.utcnow() - cached[0] < max_age:
             return cached[1]
-        if (pending := self._pending.get(stop_ref)) is not None:
+        if (pending := self._pending.get(key)) is not None:
             return await pending
-        future: asyncio.Future[list[Departure]] = asyncio.get_running_loop().create_future()
-        self._pending[stop_ref] = future
+        future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+        self._pending[key] = future
         try:
-            found = await self.transit().departures(
-                stop_ref, dt_util.utcnow(), include_cancelled=True
-            )
+            found = await fetch()
         except Exception as err:
             future.set_exception(err)
             # Nobody else may be waiting; don't warn about an exception nobody reads.
             future.exception()
             raise
         else:
-            self._cache[stop_ref] = (dt_util.utcnow(), found)
+            self._cache[key] = (dt_util.utcnow(), found)
             future.set_result(found)
             return found
         finally:
-            del self._pending[stop_ref]
+            del self._pending[key]
+
+    async def departures(self, stop_ref: str, max_age: timedelta) -> list[Departure]:
+        """The station's departures."""
+        return await self._shared(
+            stop_ref,
+            max_age,
+            lambda: self.transit().departures(stop_ref, dt_util.utcnow(), include_cancelled=True),
+        )
+
+    async def drive(self, route: dict[str, Any], max_age: timedelta) -> dict[str, Any]:
+        """How long the car route takes when leaving now; also the drive time the route list shows."""
+
+        async def fetch() -> dict[str, Any]:
+            origin = self.store.location(route["origin_id"])
+            destination = self.store.location(route["destination_id"])
+            trip = await self.car().trip_now(
+                (origin["latitude"], origin["longitude"]),
+                (destination["latitude"], destination["longitude"]),
+            )
+            drive = drive_of(trip)
+            if self.store.trips.get(route["id"]) != drive:
+                self.store.trips[route["id"]] = drive
+                self.store.delay_save()
+            return {**drive, "checked_at": dt_util.utcnow().isoformat()}
+
+        return await self._shared(f"car:{route['id']}", max_age, fetch)
 
     async def boards(
         self, route_ids: list[str] | None, count: int, refresh: timedelta
     ) -> list[dict[str, Any]]:
-        """For each transit route: its station and next departures on its ticked lines."""
-        routes = [
-            r
-            for r in self.store.routes
-            if r["mode"] == MODE_TRANSIT and (not route_ids or r["id"] in route_ids)
-        ]
+        """For each transit route: its station and next departures on its ticked lines.
+        For each car route: the drive time when leaving now. In the order of `route_ids` if given."""
+        if route_ids:
+            routes = [r for route_id in route_ids for r in self.store.routes if r["id"] == route_id]
+        else:
+            routes = list(self.store.routes)
         boards = []
         for route in routes:
-            board: dict[str, Any] = {"route_id": route["id"], "name": route["name"]}
+            board: dict[str, Any] = {"route_id": route["id"], "name": route["name"], "mode": route["mode"]}
             boards.append(board)
+            if route["mode"] == MODE_CAR:
+                try:
+                    board.update(await self.drive(route, refresh - SLACK))
+                except Exception as err:  # noqa: BLE001 - one route failing mustn't empty the card
+                    board["error"] = str(err) or type(err).__name__
+                continue
             if not route.get("lines"):
                 board["error"] = f"Pick a line for {route['name']}"
                 continue

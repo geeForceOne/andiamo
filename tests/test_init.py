@@ -447,6 +447,49 @@ async def test_timetable(hass: HomeAssistant, ws, transit, freezer) -> None:
     assert not (await ws("timetable", refresh=10))["success"]
 
 
+async def test_timetable_with_car_routes_in_card_order(hass: HomeAssistant, ws, transit, car) -> None:
+    car_route = await _car_route(ws, hass)
+    home = car_route["origin_id"]
+    await ws("station/save", item={"location_id": home, "name": "Tram", "stop_ref": "x", "walk_minutes": 5})
+    line = {"key": "10|Flughafen", "name": "10", "destination": "Flughafen"}
+    transit_route = (await ws("route/save", item={
+        "name": "Work", "mode": "transit", "origin_id": home, "lines": [line],
+    }))["result"]
+    car.now = (1500, 240)
+    car.now_calls = 0
+    # The card's order, not the panel's.
+    assert (await ws("timetable", route_ids=[transit_route["id"], car_route["id"]], refresh=60))["success"]
+    boards = (await ws.event("boards"))["boards"]
+    assert [b["route_id"] for b in boards] == [transit_route["id"], car_route["id"]]
+    drive = boards[1]
+    assert drive["mode"] == "car"
+    assert (drive["travel_minutes"], drive["traffic_minutes"], drive["length_km"]) == (25, 4, 32.4)
+    assert "checked_at" in drive
+    assert car.now_calls == 1
+    # The route list shows the new drive time too.
+    assert hass.data[DOMAIN].store.trips[car_route["id"]]["travel_minutes"] == 25
+
+    # A second card shares the call.
+    assert (await ws("timetable", route_ids=[car_route["id"]], refresh=30))["success"]
+    assert (await ws.event("boards"))["boards"][0]["travel_minutes"] == 25
+    assert car.now_calls == 1
+
+
+async def test_reorder(hass: HomeAssistant, ws) -> None:
+    home = (await ws.state())["locations"][0]["id"]
+    a = (await ws("location/save", item={"name": "A", "latitude": 47.1, "longitude": 8.1}))["result"]
+    b = (await ws("location/save", item={"name": "B", "latitude": 47.2, "longitude": 8.2}))["result"]
+    assert (await ws("reorder", kind="locations", ids=[b["id"], home]))["success"]
+    # A wasn't listed: it keeps its place after the listed ones.
+    assert [l["id"] for l in (await ws.state())["locations"]] == [b["id"], home, a["id"]]
+
+    first = (await ws("route/save", item={"name": "1", "mode": "car", "origin_id": a["id"], "destination_id": b["id"]}))["result"]
+    second = (await ws("route/save", item={"name": "2", "mode": "car", "origin_id": b["id"], "destination_id": a["id"]}))["result"]
+    assert (await ws("reorder", kind="routes", ids=[second["id"], first["id"]]))["success"]
+    assert [r["name"] for r in (await ws.state())["routes"]] == ["2", "1"]
+    assert not (await ws("reorder", kind="stations", ids=[]))["success"]
+
+
 async def test_departure_sensors(hass: HomeAssistant, ws, transit, freezer) -> None:
     home = (await ws.state())["locations"][0]["id"]
     await ws("station/save", item={"location_id": home, "name": "Tram", "stop_ref": "x", "walk_minutes": 5})
