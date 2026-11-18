@@ -30,7 +30,7 @@ const T = {
   noKeyTransit: "No opentransportdata.swiss key: public transport is off.",
   noKeyCar: "No TomTom key: car routes and address search are off.",
   keysHint: "API keys: Settings → Devices & services → Andiamo → Reconfigure.",
-  deleteConfirm: "Delete {0}? Click again to confirm.", delay: "+{0} min",
+  deleteConfirm: "Delete {0}? Click again to confirm.", delay: "+{0} min", early: "{0} min early",
   german: "German", english: "English", badTime: "Enter a time like {0}.", badDate: "Enter a date like {0}.",
   date: "Date", defaultSpeaker: "Default ({0})", drive: "{0} min drive", traffic: "+{0} min traffic", reserve: "+{0} min reserve", km: "{0} km",
   eta: "ETA {0}", drag: "Drag to sort",
@@ -612,6 +612,13 @@ class AndiamoPanel extends HTMLElement {
       </section>`;
   }
 
+  // " +2 min" in red when late, " 1 min early" in gray when early, nothing when on time.
+  _delay(minutes) {
+    if (minutes > 0) return ` <span class="late">${this._t("delay", minutes)}</span>`;
+    if (minutes < 0) return ` <span class="early">${this._t("early", -minutes)}</span>`;
+    return "";
+  }
+
   _routeRow(r) {
     const run = this._run(r.id);
     const from = this._loc(r.origin_id)?.name;
@@ -638,7 +645,7 @@ class AndiamoPanel extends HTMLElement {
     let action;
     let runText = "";
     if (run) {
-      const delay = run.delay_minutes ? ` <span class="late">${this._t("delay", run.delay_minutes)}</span>` : "";
+      const delay = this._delay(run.delay_minutes);
       const line = run.line ? ` · ${esc(run.line)} ${run.departure ? clock(run.departure) : ""}${delay}`
         : run.arrive_at ? ` · ${this._t("arriveBy")} ${esc(arrival(run.arrive_at))}` : "";
       runText = `<span class="run">${run.leave_at ? `${this._t("inMin", shortMinutes(minutesUntil(run.leave_at)))} · ${this._t("leaveAt", clock(run.leave_at))}` : this._t("running")}${line}</span>`;
@@ -955,6 +962,7 @@ const STYLE = `
   .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .run { font-weight: 500; }
   .late { color: var(--error-color); }
+  .early { color: var(--secondary-text-color); }
   button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--divider-color); background: none;
     color: var(--primary-text-color); cursor: pointer; }
   button.primary { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color); }

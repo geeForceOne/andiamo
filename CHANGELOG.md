@@ -14,6 +14,7 @@
 ### Fixed
 
 - On phones, the Settings dropdowns (e.g. Speaker) no longer run past the edge of the screen.
+- A tram or train running early shows "1 min early" instead of a red "+-1 min"; the timetable view shows it too.
 
 ## 1.1.0 - 2026-10-25
 

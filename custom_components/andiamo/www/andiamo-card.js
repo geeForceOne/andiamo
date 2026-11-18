@@ -14,7 +14,7 @@
 
 const T = {
   start: "Start", stop: "Stop", next: "Next", nextHint: "Skip to the next departure", checkHint: "Drive time and traffic right now", arriveBy: "Arrive by", leaveAt: "Leave at {0}", inMin: "in {0}",
-  running: "Running", noRoutes: "No routes. Add them on the Andiamo page.", delay: "+{0} min",
+  running: "Running", noRoutes: "No routes. Add them on the Andiamo page.", delay: "+{0} min", early: "{0} min early",
   badTime: "Enter a time like {0}.", badDate: "Enter a date like {0}.", date: "Date",
   leaveIn: "leave in {0}", leaveNow: "leave now", tooLate: "too late", cancelled: "cancelled", walk: "{0} min walk",
   noDepartures: "No departures soon.",
@@ -301,6 +301,13 @@ class AndiamoCard extends HTMLElement {
     if (active) this.shadowRoot.querySelector(`[data-time="${active}"]`)?.focus();
   }
 
+  // " +2 min" in red when late, " 1 min early" in gray when early, nothing when on time.
+  _delay(minutes) {
+    if (minutes > 0) return ` <span class="late">${this._t("delay", minutes)}</span>`;
+    if (minutes < 0) return ` <span class="early">${this._t("early", -minutes)}</span>`;
+    return "";
+  }
+
   _row(r) {
     const run = this._data.runs.find((x) => x.route_id === r.id);
     // Car routes: check the drive time now, right before Start or Stop.
@@ -310,7 +317,7 @@ class AndiamoCard extends HTMLElement {
     let right;
     let info = "";
     if (run) {
-      const delay = run.delay_minutes ? ` <span class="late">${this._t("delay", run.delay_minutes)}</span>` : "";
+      const delay = this._delay(run.delay_minutes);
       info = `${run.leave_at
         ? `<div class="run">${this._t("inMin", shortMinutes(minutesUntil(run.leave_at)))} · ${this._t("leaveAt", clock(run.leave_at))}</div>
            ${run.line ? `<div class="muted">${esc(run.line)} ${run.departure ? clock(run.departure) : ""}${delay}</div>` : ""}`
@@ -378,7 +385,7 @@ class AndiamoCard extends HTMLElement {
     else list = departures.map((d) => {
       const left = minutesUntil(d.leave_at);
       const late = d.cancelled ? ` <span class="late">${this._t("cancelled")}</span>`
-        : d.delay_minutes > 0 ? ` <span class="late">${this._t("delay", d.delay_minutes)}</span>` : "";
+        : this._delay(d.delay_minutes);
       const missed = tooLate(d);
       const leave = d.cancelled ? "" : missed ? this._t("tooLate") : left ? this._t("leaveIn", shortMinutes(left)) : this._t("leaveNow");
       return `<div class="dep ${d.cancelled ? "gone" : ""} ${missed ? "missed" : ""}">
@@ -501,6 +508,7 @@ const STYLE = `
   .name { font-weight: 500; }
   .run { color: var(--primary-color); font-weight: 500; }
   .late { color: var(--error-color); }
+  .early { color: var(--secondary-text-color); }
   .muted { color: var(--secondary-text-color); font-size: 0.9em; }
   .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; margin-left: auto; }
   button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--divider-color); background: none;
