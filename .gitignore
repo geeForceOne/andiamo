@@ -8,3 +8,7 @@ __pycache__/
 .dev/
 .env
 secrets.yaml
+
+# Personal Claude Code files
+.claude/settings.local.json
+.claude/skills/release/
