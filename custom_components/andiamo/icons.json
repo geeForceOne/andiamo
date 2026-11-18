@@ -8,6 +8,9 @@
     },
     "stop": {
       "service": "mdi:stop"
+    },
+    "next": {
+      "service": "mdi:skip-next"
     }
   }
 }

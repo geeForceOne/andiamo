@@ -9,13 +9,14 @@
 // routes: [Home → Girlfriend]   (optional: route names or ids, shown in this order)
 // show_date: false   (optional, routes view: hide the date next to "Arrive by"; default true)
 // departures: 5      (optional, timetable: departures per route, 1–20)
+// show_late: true    (optional, timetable: also show departures you can't reach on foot, grayed out; default false)
 // refresh: 60        (optional, timetable: seconds between updates, 30–300)
 
 const T = {
-  start: "Start", stop: "Stop", checkHint: "Drive time and traffic right now", arriveBy: "Arrive by", leaveAt: "Leave at {0}", inMin: "in {0}",
+  start: "Start", stop: "Stop", next: "Next", nextHint: "Skip to the next departure", checkHint: "Drive time and traffic right now", arriveBy: "Arrive by", leaveAt: "Leave at {0}", inMin: "in {0}",
   running: "Running", noRoutes: "No routes. Add them on the Andiamo page.", delay: "+{0} min",
   badTime: "Enter a time like {0}.", badDate: "Enter a date like {0}.", date: "Date",
-  leaveIn: "leave in {0}", leaveNow: "leave now", cancelled: "cancelled", walk: "{0} min walk",
+  leaveIn: "leave in {0}", leaveNow: "leave now", tooLate: "too late", cancelled: "cancelled", walk: "{0} min walk",
   noDepartures: "No departures soon.",
   drive: "{0} min drive", traffic: "+{0} min traffic", reserve: "+{0} min reserve", km: "{0} km", eta: "ETA {0}",
   driveNow: "{0} min", jam: "{0} min traffic jam",
@@ -130,7 +131,7 @@ const etaText = (trip, t) => (trip ? t("eta", clock(new Date(Date.now() + trip.t
 // Minutes a car route plans on top of the drive time: its own, else the setting.
 const reserveOf = (route, settings) => route.reserve_minutes ?? settings?.car_reserve_minutes ?? 0;
 
-const DEFAULTS = { view: "routes", show_date: true, departures: 5, refresh: 60 };
+const DEFAULTS = { view: "routes", show_date: true, departures: 5, refresh: 60, show_late: false };
 
 class AndiamoCard extends HTMLElement {
   constructor() {
@@ -213,6 +214,7 @@ class AndiamoCard extends HTMLElement {
       route_ids: this._routes().map((r) => r.id),
       count: Number(this._config.departures),
       refresh: Number(this._config.refresh),
+      late: !!this._config.show_late,
     };
     const key = JSON.stringify(msg);
     if (key === this._ttKey) return;
@@ -255,6 +257,7 @@ class AndiamoCard extends HTMLElement {
       this._error = "";
       if (action === "start") await this._hass.callWS({ type: "andiamo/start", route_id: routeId });
       if (action === "cancel") await this._hass.callWS({ type: "andiamo/cancel", route_id: routeId });
+      if (action === "next") await this._hass.callWS({ type: "andiamo/next", route_id: routeId });
       if (action === "check") await this._hass.callWS({ type: "andiamo/check", route_id: routeId });
       if (action === "start-car") {
         const typed = this._times[routeId];
@@ -313,7 +316,11 @@ class AndiamoCard extends HTMLElement {
            ${run.line ? `<div class="muted">${esc(run.line)} ${run.departure ? clock(run.departure) : ""}${delay}</div>` : ""}`
         : `<div class="run">${this._t("running")}</div>`}
         ${run.arrive_at ? `<div class="muted">${this._t("arriveBy")} ${esc(arrival(run.arrive_at))}</div>` : ""}`;
-      right = `${check}<button data-action="cancel" data-route="${r.id}">${this._t("stop")}</button>`;
+      // Public transport: skip to the next departure, right before Stop.
+      const next = r.mode === "transit"
+        ? `<button data-action="next" data-route="${r.id}" title="${this._t("nextHint")}">${this._t("next")}</button>`
+        : "";
+      right = `${check}${next}<button data-action="cancel" data-route="${r.id}">${this._t("stop")}</button>`;
     } else if (r.mode === "transit") {
       right = `<button class="primary" data-action="start" data-route="${r.id}">${this._t("start")}</button>`;
     } else {
@@ -358,7 +365,13 @@ class AndiamoCard extends HTMLElement {
     const route = this._data.routes.find((r) => r.id === b.route_id);
     const where = b.station ? `${esc(b.station)}${b.walk_minutes ? ` · ${this._t("walk", b.walk_minutes)}` : ""}` : "";
     const now = Date.now();
-    const departures = (b.departures || []).filter((d) => new Date(d.leave_at) >= now - 30000).slice(0, Number(this._config.departures));
+    // Too late to walk there: only with show_late, grayed out and not counted in "departures per route".
+    const tooLate = (d) => new Date(d.leave_at) < now - 30000;
+    const all = b.departures || [];
+    const departures = [
+      ...(this._config.show_late ? all.filter((d) => tooLate(d) && new Date(d.departure) >= now - 30000) : []),
+      ...all.filter((d) => !tooLate(d)).slice(0, Number(this._config.departures)),
+    ];
     let list;
     if (b.error && !b.departures) list = `<div class="muted">${esc(b.error)}</div>`;
     else if (!departures.length) list = `<div class="muted">${this._t("noDepartures")}</div>`;
@@ -366,8 +379,9 @@ class AndiamoCard extends HTMLElement {
       const left = minutesUntil(d.leave_at);
       const late = d.cancelled ? ` <span class="late">${this._t("cancelled")}</span>`
         : d.delay_minutes > 0 ? ` <span class="late">${this._t("delay", d.delay_minutes)}</span>` : "";
-      const leave = d.cancelled ? "" : left ? this._t("leaveIn", shortMinutes(left)) : this._t("leaveNow");
-      return `<div class="dep ${d.cancelled ? "gone" : ""}">
+      const missed = tooLate(d);
+      const leave = d.cancelled ? "" : missed ? this._t("tooLate") : left ? this._t("leaveIn", shortMinutes(left)) : this._t("leaveNow");
+      return `<div class="dep ${d.cancelled ? "gone" : ""} ${missed ? "missed" : ""}">
         <span class="line">${esc(d.line)}</span>
         <span class="grow dest">${esc(d.destination)}</span>
         <span class="time">${clock(d.departure)}${late}</span>
@@ -429,6 +443,7 @@ class AndiamoCardEditor extends HTMLElement {
         ? [
           { name: "departures", selector: { number: { min: 1, max: 20, mode: "box" } } },
           { name: "refresh", selector: { number: { min: 30, max: 300, step: 30, mode: "slider", unit_of_measurement: "s" } } },
+          { name: "show_late", selector: { boolean: {} } },
         ]
         : [{ name: "show_date", selector: { boolean: {} } }]),
     ];
@@ -458,7 +473,7 @@ class AndiamoCardEditor extends HTMLElement {
       if (v === "" || v === undefined || (Array.isArray(v) && !v.length) || DEFAULTS[key] === v) delete config[key];
     }
     if (config.view === "timetable") { delete config.mode; delete config.show_date; }
-    else { delete config.departures; delete config.refresh; }
+    else { delete config.departures; delete config.refresh; delete config.show_late; }
     this._config = config;
     this._render();
     this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
@@ -467,11 +482,12 @@ class AndiamoCardEditor extends HTMLElement {
 
 const LABELS = {
   title: "Title", view: "Show", mode: "Routes of type", routes: "Routes", show_date: "Show the date next to \"Arrive by\"",
-  departures: "Departures per route", refresh: "Refresh every",
+  departures: "Departures per route", refresh: "Refresh every", show_late: "Show departures you can't reach on foot",
 };
 const HELPERS = {
   routes: "None picked: all of them. Drag to change the order.",
   show_date: "Off: today, or tomorrow once the time has passed.",
+  show_late: "Grayed out as \"too late\", e.g. when you're already at the stop.",
 };
 
 const STYLE = `
@@ -506,6 +522,8 @@ const STYLE = `
   .dep .dest { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dep .time, .dep .leave { white-space: nowrap; }
   .dep .leave { min-width: 7.5em; text-align: right; }
+  .dep.missed { opacity: 0.5; }
+  .dep.missed .leave { color: var(--secondary-text-color); }
   .dep.gone .dest, .dep.gone .time { text-decoration: line-through; color: var(--secondary-text-color); }
 `;
 

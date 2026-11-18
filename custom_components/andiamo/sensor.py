@@ -69,6 +69,10 @@ class LeaveSensor(RouteEntity, SensorEntity):
         """The andiamo.stop action; nothing happens when the route isn't running."""
         await self.runtime.runs.async_cancel(self.route_id)
 
+    async def async_next_route(self) -> None:
+        """The andiamo.next action: a running public transport route skips to the next departure."""
+        await self.runtime.runs.async_next(self.route_id)
+
     @callback
     def _runs_changed(self) -> None:
         self.async_write_ha_state()

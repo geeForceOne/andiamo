@@ -137,15 +137,21 @@ async def test_panel_flow(hass: HomeAssistant, ws, transit) -> None:
             destination="Flughafen",
             mode="tram",
             line_key="10|Flughafen",
-        )
+        ),
+        Departure(at(20), at(20), "10", "Flughafen", "tram", "10|Flughafen"),
     ]
     await hass.services.async_call("button", "press", {"entity_id": button}, blocking=True)
     await hass.async_block_till_done()
     assert dt_util.parse_datetime(hass.states.get(sensor).state) == at(7)
     assert hass.states.get(sensor).attributes["line"] == "10"
 
-    # Pressing again cancels.
+    # Pressing again goes to the next departure.
     await hass.services.async_call("button", "press", {"entity_id": button}, blocking=True)
+    await hass.async_block_till_done()
+    assert dt_util.parse_datetime(hass.states.get(sensor).state) == at(15)
+
+    # andiamo.next does the same; with no departure left the route stops.
+    await hass.services.async_call(DOMAIN, "next", target={"entity_id": sensor}, blocking=True)
     await hass.async_block_till_done()
     assert hass.states.get(sensor).state == "unknown"
 
@@ -407,6 +413,9 @@ async def test_start_from_card_starts_over(hass: HomeAssistant, ws, transit) -> 
     # A second tap (double click, old screen) starts over instead of cancelling.
     assert (await ws("start", route_id=route["id"]))["success"]
     assert runtime.runs.runs[route["id"]] is not first
+    # Next from the card: no departure after the 10:12, so the route stops.
+    assert (await ws("next", route_id=route["id"]))["success"]
+    assert route["id"] not in runtime.runs.runs
     # A car route without a time can't start.
     car_route = await _car_route(ws, hass)
     assert "set an arrival time" in (await ws("start", route_id=car_route["id"]))["error"]["message"]
@@ -445,6 +454,11 @@ async def test_timetable(hass: HomeAssistant, ws, transit, freezer) -> None:
     assert len(transit.calls) == 1
 
     assert not (await ws("timetable", refresh=10))["success"]
+
+    # With late, the 10:03 shows too (too soon to walk to), on top of the count.
+    assert (await ws("timetable", route_ids=[route["id"]], count=2, refresh=60, late=True))["success"]
+    board = (await ws.event("boards"))["boards"][0]
+    assert [d["planned_departure"] for d in board["departures"]][:2] == [at(3).isoformat(), at(10).isoformat()]
 
 
 async def test_timetable_with_car_routes_in_card_order(hass: HomeAssistant, ws, transit, car) -> None:

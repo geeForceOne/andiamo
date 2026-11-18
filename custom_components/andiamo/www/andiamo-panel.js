@@ -8,7 +8,7 @@ const T = {
   station: "Station", noStationHere: "{0} has no station yet. Add one on the Places tab.", speaker: "Speaker",
   lines: "Lines", pickLine: "Pick a line", loadingLines: "Loading lines…", noLines: "No departures found from this station.",
   walk: "Walk (min)", save: "Save", cancel: "Cancel", delete: "Delete", edit: "Edit",
-  start: "Start", stop: "Stop", checkHint: "Drive time and traffic right now", arriveBy: "Arrive by", leaveAt: "Leave at {0}", inMin: "in {0}",
+  start: "Start", stop: "Stop", next: "Next", nextHint: "Skip to the next departure", checkHint: "Drive time and traffic right now", arriveBy: "Arrive by", leaveAt: "Leave at {0}", inMin: "in {0}",
   search: "Search", searchStop: "Search a stop…", searchAddress: "Search an address…",
   latitude: "Latitude", longitude: "Longitude", useHome: "Use HA home",
   tts: "Text-to-speech", language: "Announcement language", none: "None", min: "min",
@@ -358,6 +358,7 @@ class AndiamoPanel extends HTMLElement {
       case "start": await this._ws("start", { route_id: arg }); return;
       case "check": await this._ws("check", { route_id: arg }); return;
       case "cancel-run": await this._ws("cancel", { route_id: arg }); return;
+      case "next": await this._ws("next", { route_id: arg }); return;
       case "show-start": {
         this._shown.add(arg);
         this._render();
@@ -641,8 +642,12 @@ class AndiamoPanel extends HTMLElement {
       const line = run.line ? ` · ${esc(run.line)} ${run.departure ? clock(run.departure) : ""}${delay}`
         : run.arrive_at ? ` · ${this._t("arriveBy")} ${esc(arrival(run.arrive_at))}` : "";
       runText = `<span class="run">${run.leave_at ? `${this._t("inMin", shortMinutes(minutesUntil(run.leave_at)))} · ${this._t("leaveAt", clock(run.leave_at))}` : this._t("running")}${line}</span>`;
+      // Public transport: skip to the next departure, right before Stop.
+      const next = r.mode === "transit"
+        ? `<button data-action="next" data-arg="${r.id}" title="${this._t("nextHint")}">${this._t("next")}</button>`
+        : "";
       action = `${compact ? "" : runText}
-        ${check}<button data-action="cancel-run" data-arg="${r.id}">${this._t("stop")}</button>`;
+        ${check}${next}<button data-action="cancel-run" data-arg="${r.id}">${this._t("stop")}</button>`;
     } else if (r.mode === "transit") {
       action = `<button class="primary" data-action="start" data-arg="${r.id}" ${this._data.providers.transit && r.lines?.length ? "" : "disabled"}>${this._t("start")}</button>`;
     } else if (compact && !this._shown.has(r.id)) {
@@ -991,12 +996,14 @@ const STYLE = `
   .setting { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
     padding: 12px 0; border-bottom: 1px solid var(--divider-color); }
   .setting:last-child { border-bottom: none; }
+  .setting > * { min-width: 0; max-width: 100%; }
   .setting .control { display: flex; align-items: center; gap: 6px; }
-  .setting select { min-width: 240px; }
+  /* A long speaker name mustn't push the field past the card's edge on a phone. */
+  .setting select { min-width: min(240px, 100%); max-width: 100%; text-overflow: ellipsis; }
   input.time { width: 90px; }
   input.date { width: 100px; }
   .setting input[type="number"] { width: 80px; }
-  .setting .control:has(.message) { flex: 1; min-width: 240px; }
+  .setting .control:has(.message) { flex: 1; min-width: min(240px, 100%); }
   .setting input.message { width: 100%; }
   .messages .setting .label { width: 120px; flex: none; }
   .error { background: var(--error-color); color: #fff; padding: 8px 12px; border-radius: 6px; margin-bottom: 16px; }

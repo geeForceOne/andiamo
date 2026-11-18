@@ -108,6 +108,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     service.async_register_platform_entity_service(
         hass, DOMAIN, "stop", entity_domain=SENSOR_DOMAIN, schema=None, func="async_stop_route"
     )
+    service.async_register_platform_entity_service(
+        hass, DOMAIN, "next", entity_domain=SENSOR_DOMAIN, schema=None, func="async_next_route"
+    )
     await hass.http.async_register_static_paths(
         [StaticPathConfig(STATIC_URL, str(FRONTEND_DIR), cache_headers=False)]
     )

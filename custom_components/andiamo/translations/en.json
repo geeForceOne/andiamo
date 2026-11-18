@@ -57,6 +57,10 @@
     "stop": {
       "name": "Stop",
       "description": "Stops a route's countdown."
+    },
+    "next": {
+      "name": "Next",
+      "description": "Skips a running public transport route to the next departure."
     }
   }
 }

@@ -207,6 +207,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_start,
         ws_check,
         ws_cancel,
+        ws_next,
         ws_timetable,
     ):
         websocket_api.async_register_command(hass, command)
@@ -327,6 +328,11 @@ async def ws_cancel(hass, runtime, msg):
     await runtime.runs.async_cancel(msg["route_id"])
 
 
+@_command("next", {vol.Required("route_id"): str})
+async def ws_next(hass, runtime, msg):
+    await runtime.runs.async_next(msg["route_id"])
+
+
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/timetable",
@@ -335,6 +341,7 @@ async def ws_cancel(hass, runtime, msg):
         vol.Optional("refresh", default=60): vol.All(
             vol.Coerce(int), vol.Range(min=30, max=300)
         ),
+        vol.Optional("late", default=False): bool,
     }
 )
 @callback
@@ -351,7 +358,9 @@ def ws_timetable(
     task: asyncio.Task[None] | None = None
 
     async def send() -> None:
-        boards = await runtime.timetable.boards(msg.get("route_ids"), msg["count"], refresh)
+        boards = await runtime.timetable.boards(
+            msg.get("route_ids"), msg["count"], refresh, late=msg["late"]
+        )
         connection.send_message(websocket_api.event_message(msg["id"], {"boards": boards}))
 
     @callback

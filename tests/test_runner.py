@@ -156,16 +156,50 @@ async def test_transit_small_delay_is_quiet(
     assert len(said()) == 1
 
 
-async def test_transit_press_again_cancels(
+async def test_transit_press_again_goes_to_next(
+    hass: HomeAssistant, runs: RunManager, routes, transit, said, clock
+) -> None:
+    transit.result = [connection(12), connection(20), connection(28)]
+    await runs.async_press(routes["transit"]["id"])
+    await runs.async_press(routes["transit"]["id"])
+
+    # Said like at the start, now for the 10:20.
+    assert said()[1:] == ["Du musst um 10:15 los, das ist in 15 Minuten."]
+    assert runs.runs[routes["transit"]["id"]].connection.departure == at(20)
+    await go_to(hass, clock, at(10))
+    assert "Los jetzt!" not in said()
+
+
+async def test_transit_next_never_goes_back(
+    hass: HomeAssistant, runs: RunManager, routes, transit, said, clock
+) -> None:
+    transit.result = [connection(12), connection(20)]
+    await runs.async_press(routes["transit"]["id"])
+    await runs.async_next(routes["transit"]["id"])
+
+    # The skipped 10:12 is 4 minutes late; the recheck still sticks with the 10:20.
+    transit.result = [connection(12, delay=4), connection(20)]
+    await go_to(hass, clock, at(4))
+    assert runs.runs[routes["transit"]["id"]].connection.departure == at(20)
+    assert len(said()) == 2
+
+
+async def test_transit_next_without_departure_stops(
     hass: HomeAssistant, runs: RunManager, routes, transit, said, clock
 ) -> None:
     transit.result = [connection(12)]
     await runs.async_press(routes["transit"]["id"])
-    await runs.async_press(routes["transit"]["id"])
+    await runs.async_next(routes["transit"]["id"])
 
-    assert said()[1:] == ["Abgebrochen."]
-    await go_to(hass, clock, at(10))
-    assert len(said()) == 2
+    assert said()[1:] == ["Ich finde keine Verbindung für Work."]
+    assert runs.runs == {}
+
+
+async def test_next_needs_a_running_transit_route(runs: RunManager, routes) -> None:
+    with pytest.raises(DataError):
+        await runs.async_next(routes["transit"]["id"])
+    with pytest.raises(DataError):
+        await runs.async_next(routes["car"]["id"])
 
 
 async def test_transit_no_connection(

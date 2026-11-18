@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.0 - 2026-11-18
+
+### New
+
+- Next: a running public transport route skips to the following departure, from the panel, the card or the new `andiamo.next` action, and announces the new time.
+- Card timetable option "Show departures you can't reach on foot": the ones leaving sooner than your walk to the station show grayed out as "too late".
+
+### Changed
+
+- Pressing a route's button entity while the route runs now goes to the next departure instead of stopping it. Stop with the `andiamo.stop` action.
+
+### Fixed
+
+- On phones, the Settings dropdowns (e.g. Speaker) no longer run past the edge of the screen.
+
 ## 1.1.0 - 2026-10-25
 
 ### New

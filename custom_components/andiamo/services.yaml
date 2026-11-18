@@ -37,3 +37,9 @@ stop:
     entity:
       integration: andiamo
       domain: sensor
+
+next:
+  target:
+    entity:
+      integration: andiamo
+      domain: sensor

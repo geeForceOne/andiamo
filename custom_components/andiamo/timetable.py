@@ -93,9 +93,10 @@ class Timetable:
         return await self._shared(f"car:{route['id']}", max_age, fetch)
 
     async def boards(
-        self, route_ids: list[str] | None, count: int, refresh: timedelta
+        self, route_ids: list[str] | None, count: int, refresh: timedelta, late: bool = False
     ) -> list[dict[str, Any]]:
-        """For each transit route: its station and next departures on its ticked lines.
+        """For each transit route: its station and next departures on its ticked lines
+        (with `late`, also the ones too soon to walk to, which come on top of `count`).
         For each car route: the drive time when leaving now. In the order of `route_ids` if given."""
         if route_ids:
             routes = [r for route_id in route_ids for r in self.store.routes if r["id"] == route_id]
@@ -129,7 +130,15 @@ class Timetable:
                 (d for d in found if d.line_key in keys and d.departure - walk >= now),
                 key=lambda d: d.departure,
             )
-            board["departures"] = [_departure(d, walk) for d in catchable[: count + 3]]
+            missed = (
+                sorted(
+                    (d for d in found if d.line_key in keys and now <= d.departure < now + walk),
+                    key=lambda d: d.departure,
+                )
+                if late
+                else []
+            )
+            board["departures"] = [_departure(d, walk) for d in missed + catchable[: count + 3]]
         return boards
 
 

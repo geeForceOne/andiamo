@@ -99,11 +99,24 @@ class RunManager:
         self.changed()
 
     async def async_press(self, route_id: str) -> None:
-        """The route's button: start a public transport countdown, or cancel it."""
+        """The route's button: start a public transport countdown, or skip to the next departure."""
         if route_id in self.runs:
-            await self.async_cancel(route_id)
+            await self.async_next(route_id)
             return
         await self.async_start_transit(route_id)
+
+    async def async_next(self, route_id: str) -> None:
+        """Skip the running route's departure and count down to the one after it."""
+        route = self.store.route(route_id)
+        if route["mode"] != MODE_TRANSIT:
+            raise DataError(f"{route['name']} is a car route; Next only works for public transport")
+        run = self.runs.get(route_id)
+        if not isinstance(run, TransitRun):
+            raise DataError(f"{route['name']} isn't running")
+        try:
+            await run.async_next()
+        finally:
+            self.changed()
 
     async def async_start(
         self, route_id: str, arrive_at: datetime | None = None, speaker: str | None = None
@@ -377,6 +390,9 @@ class TransitRun(Run):
         self.station = manager.store.route_station(route)
         self.line_keys = {line["key"] for line in route["lines"]}
         self.connection: Departure | None = None
+        # After "Next": departures skipped, and nothing leaving at or before this time.
+        self.skipped: set[tuple[str, datetime]] = set()
+        self.floor: datetime | None = None
 
     @property
     def margin(self) -> timedelta:
@@ -390,6 +406,16 @@ class TransitRun(Run):
         found = await self.manager.transit().departures(self.station["stop_ref"], earliest)
         return [d for d in found if d.line_key in self.line_keys]
 
+    def _catchable(self, found: list[Departure], now: datetime) -> list[Departure]:
+        """Departures one can still walk to, leaving out the ones skipped with Next."""
+        return [
+            c
+            for c in found
+            if self.leave_time(c) >= now
+            and (c.line_key, c.planned_departure) not in self.skipped
+            and (self.floor is None or c.departure > self.floor)
+        ]
+
     async def async_start(self) -> None:
         now = dt_util.utcnow()
         try:
@@ -398,7 +424,7 @@ class TransitRun(Run):
             await self.say(self.message("no_connection"))
             raise
         # Too late for the next one: quietly take the next one we can catch.
-        catchable = [c for c in found if self.leave_time(c) >= now]
+        catchable = self._catchable(found, now)
         if not catchable:
             await self.say(self.message("no_connection"))
             raise DataError(f"No connection found for {self.route['name']}")
@@ -438,7 +464,7 @@ class TransitRun(Run):
         if self.leave_at <= now:
             return
         found = await self._connections(now)
-        catchable = [c for c in found if self.leave_time(c) >= now]
+        catchable = self._catchable(found, now)
         if not catchable:
             self.schedule_recheck(TRANSIT_RECHECK)
             return
@@ -453,6 +479,29 @@ class TransitRun(Run):
             await self.async_go()
             return
         await self.say(self.say_leave("changed", now))
+        self._schedule(now)
+
+    async def async_next(self) -> None:
+        """Skip the current departure; say the new one like at the start."""
+        assert self.connection is not None
+        skipped = self.connection
+        self.skipped.add((skipped.line_key, skipped.planned_departure))
+        self.floor = max(self.floor or skipped.departure, skipped.departure)
+        now = dt_util.utcnow()
+        found = await self._connections(max(now + self.margin, skipped.departure))
+        catchable = self._catchable(found, now)
+        if not catchable:
+            self.stop()
+            await self.say(self.message("no_connection"))
+            await self.manager.async_finished(self)
+            return
+        self.connection = catchable[0]
+        self.leave_at = self.leave_time(self.connection)
+        self.manager.changed()
+        if minutes_until(self.leave_at, now) == 0:
+            await self.async_go()
+            return
+        await self.say(self.say_leave("leave_at", now))
         self._schedule(now)
 
     def placeholders(self) -> dict[str, str]:

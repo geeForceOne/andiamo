@@ -6,7 +6,7 @@
 
 Andiamo (Italian for *"let's go!"*) is a Home Assistant integration that tells you, out loud on your speaker, exactly when to leave the house: to catch your bus, tram or train, or to arrive somewhere by car on time.
 
-- **Public transport (Switzerland):** press one button and your speaker says *"You need to leave at 10:15, that is in 7 minutes."*, then *"2 minutes left"* and *"Go now!"*. Andiamo knows how long you walk to your stop and which lines you take, follows real-time delays, and announces a new time if yours moves. Too late for the next train, bus or tram? It quietly picks the one after. Press again to cancel.
+- **Public transport (Switzerland):** press one button and your speaker says *"You need to leave at 10:15, that is in 7 minutes."*, then *"2 minutes left"* and *"Go now!"*. Andiamo knows how long you walk to your stop and which lines you take, follows real-time delays, and announces a new time if yours moves. Too late for the next train, bus or tram? It quietly picks the one after. Want a later one? Press Next.
 - **Car:** set "arrive by 19:00" on the dashboard card. From 30 minutes before you need to leave, the speaker counts down every 5 minutes (*"You have 25 minutes left"*) and ends with *"Go now!"*. Live traffic is followed all the way, so a jam on the way means an earlier "go". Need a few minutes for parking? Add a **reserve**: with a 30-minute drive and 10 minutes reserve, Andiamo plans 40 minutes.
 
 Everything is set up on one sidebar page, no YAML. Announcements are in German (default) or English.
@@ -15,9 +15,9 @@ Everything is set up on one sidebar page, no YAML. Announcements are in German (
 
 ## Screenshots
 
-**Routes:** one tap to start. The watchdog flags a cancelled tram; the open car route is watched on weekday evenings (alert from 10 minutes of traffic) and weekend mornings (from 15).
+**Routes:** one tap to start; a running route counts down to the leave time, and Next skips to the following departure. The open car route is watched on weekday evenings (alert from 10 minutes of traffic).
 
-![Routes tab with a watchdog problem and a route form with two watch windows](docs/screenshots/routes.png)
+![Routes tab with two running public transport routes (Next and Stop) and a car route form with a watch window](docs/screenshots/routes.png)
 
 **Places and stations:** each place has its stations with the walking time; the search shows what stops there, so the train station is easy to tell from the tram stop outside.
 
@@ -34,7 +34,7 @@ Everything is set up on one sidebar page, no YAML. Announcements are in German (
 
 **Timetable:** the next departures on your lines, with delays and when to leave, counting the walk to the station, and for car routes the drive time, traffic jam and ETA if you leave now.
 
-<img src="https://raw.githubusercontent.com/geeForceOne/andiamo/main/docs/screenshots/card-timetable.png" alt="Andiamo card in timetable view with a car route" width="420">
+<img src="https://raw.githubusercontent.com/geeForceOne/andiamo/main/docs/screenshots/card-timetable.png" alt="Andiamo card in timetable view with too-late departures grayed out and a car route" width="420">
 
 **Card editor:** set the card up without YAML.
 
@@ -78,7 +78,8 @@ Open **Andiamo** in the sidebar.
 
 ## Use
 
-- Each public transport route gets a button entity, e.g. `button.andiamo_home_office`. Press it from a dashboard, or from a physical button with an automation:
+- While a public transport route runs, **Next** (next to Stop in the panel and the card) skips to the following departure and announces it. Andiamo never goes back to the one you skipped, even if it is delayed.
+- Each public transport route gets a button entity, e.g. `button.andiamo_home_office`. The first press starts the route; pressing again while it runs goes to the next departure. To stop, use the `andiamo.stop` action. Press it from a dashboard, or from a physical button with an automation:
 
   ```yaml
   triggers:
@@ -92,11 +93,11 @@ Open **Andiamo** in the sidebar.
 
 - Add the **Andiamo** card to a dashboard and set it up in the card editor. It shows one of two views:
   - **Routes:** starts and stops routes and sets "arrive by" for car routes. Turn off **Show the date** to hide the date box; the arrival is then today, or tomorrow once the time has passed.
-  - **Timetable:** the next departures of your public transport routes, on the lines you ticked: line, destination, departure time with delay or cancellation, and when to leave, counting the walk to the station. Car routes show the drive time if you leave now, e.g. *25 min · 32 km · 4 min traffic jam · ETA 12:00* (the traffic jam only when there is one). Choose how many departures per route (default 5) and how often they refresh (30 seconds to 5 minutes, default 1 minute). Departures and drive times are only fetched while a card shows them, and cards showing the same station or car route share one request. At a 1-minute refresh, each car route uses up to 60 TomTom requests an hour while a card is open.
+  - **Timetable:** the next departures of your public transport routes, on the lines you ticked: line, destination, departure time with delay or cancellation, and when to leave, counting the walk to the station. Car routes show the drive time if you leave now, e.g. *25 min · 32 km · 4 min traffic jam · ETA 12:00* (the traffic jam only when there is one). Choose how many departures per route (default 5) and how often they refresh (30 seconds to 5 minutes, default 1 minute). Turn on **Show departures you can't reach on foot** to also list the ones leaving sooner than your walk to the station, grayed out as *too late* (handy when you're already at the stop). Departures and drive times are only fetched while a card shows them, and cards showing the same station or car route share one request. At a 1-minute refresh, each car route uses up to 60 TomTom requests an hour while a card is open.
 
   Picked routes show in the order you picked them; drag them in the card editor to change it. With none picked, the card shows all routes in the Andiamo page's order.
 
-  In YAML: `type: custom:andiamo-card` with optional `title`, `view` (`routes` or `timetable`), `mode` (`car` or `transit`), `routes` (names or ids, in the order to show), `show_date`, `departures` and `refresh` (seconds).
+  In YAML: `type: custom:andiamo-card` with optional `title`, `view` (`routes` or `timetable`), `mode` (`car` or `transit`), `routes` (names or ids, in the order to show), `show_date`, `departures`, `refresh` (seconds) and `show_late`.
 - **Sort** routes and places on the Andiamo page by dragging them by the handle on the left.
 - Car routes in the panel and the card show the last known drive time and an **ETA** if you leave now, e.g. *25 min drive · 32 km · ETA 12:00*. It moves on every minute without new requests, so it can be off if the traffic has changed since the last check.
 - While a route runs, the panel and the card show the countdown first, then the leave time, e.g. *in 1 h 5 min · Leave at 17:20 · Arrive by 18:30*. From an hour on, countdowns read hours and minutes.
@@ -114,7 +115,7 @@ Open **Andiamo** in the sidebar.
         message: "{{ drive['sensor.andiamo_home_office'].message }}"
   ```
 
-- Start and stop any route from automations and scripts with the `andiamo.start` and `andiamo.stop` actions, aimed at the route's sensor. Car routes need a time; the date is optional (today, or tomorrow if the time has passed). `speaker` announces on another speaker for this run only. Starting a route that is already running starts it over.
+- Start and stop any route from automations and scripts with the `andiamo.start` and `andiamo.stop` actions, aimed at the route's sensor. `andiamo.next` skips a running public transport route to the next departure. Car routes need a time; the date is optional (today, or tomorrow if the time has passed). `speaker` announces on another speaker for this run only. Starting a route that is already running starts it over.
 
   ```yaml
   actions:
