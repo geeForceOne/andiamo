@@ -15,10 +15,13 @@ from .const import (
     ANNOUNCE_NOTIFICATION,
     ANNOUNCE_SPEAKER,
     DEFAULT_CAR_LEAD_MINUTES,
+    DEFAULT_CAR_REMINDER_EVERY,
     DEFAULT_CAR_RESERVE_MINUTES,
     DEFAULT_LIMIT_OJP,
     DEFAULT_LIMIT_TOMTOM,
     DEFAULT_LANGUAGE,
+    DEFAULT_TRANSIT_REMINDER_EVERY,
+    DEFAULT_TRANSIT_REMINDER_MINUTES,
     MODE_CAR,
     MODE_TRANSIT,
     SIGNAL_DATA_CHANGED,
@@ -30,7 +33,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "tts_entity": None,
     "speaker": None,
     "language": DEFAULT_LANGUAGE,
+    "transit_reminder_minutes": DEFAULT_TRANSIT_REMINDER_MINUTES,
+    "transit_reminder_every": DEFAULT_TRANSIT_REMINDER_EVERY,
     "car_lead_minutes": DEFAULT_CAR_LEAD_MINUTES,
+    "car_reminder_every": DEFAULT_CAR_REMINDER_EVERY,
     "car_reserve_minutes": DEFAULT_CAR_RESERVE_MINUTES,
     "announce": ANNOUNCE_SPEAKER,
     "templates": {},
@@ -134,6 +140,16 @@ class AndiamoStore:
         if own is not None:
             return own
         return self.settings.get("car_reserve_minutes", DEFAULT_CAR_RESERVE_MINUTES)
+
+    def reminders(self, mode: str) -> list[int]:
+        """Minutes before leaving at which to remind, largest first (e.g. 30, 25, ... 5)."""
+        if mode == MODE_CAR:
+            start = self.settings.get("car_lead_minutes", DEFAULT_CAR_LEAD_MINUTES)
+            every = self.settings.get("car_reminder_every", DEFAULT_CAR_REMINDER_EVERY)
+        else:
+            start = self.settings.get("transit_reminder_minutes", DEFAULT_TRANSIT_REMINDER_MINUTES)
+            every = self.settings.get("transit_reminder_every", DEFAULT_TRANSIT_REMINDER_EVERY)
+        return list(range(start, 0, -max(1, every)))
 
     def route_station(self, route: dict[str, Any]) -> dict[str, Any]:
         """The station a public transport route boards at."""

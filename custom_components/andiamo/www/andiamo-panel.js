@@ -12,7 +12,8 @@ const T = {
   search: "Search", searchStop: "Search a stop…", searchAddress: "Search an address…",
   latitude: "Latitude", longitude: "Longitude", useHome: "Use HA home",
   tts: "Text-to-speech", language: "Announcement language", none: "None", min: "min",
-  lead: "Car countdown starts", leadHint: "Minutes before leaving",
+  transitReminders: "Transit reminders", carReminders: "Car reminders",
+  remindersHint: "Minutes before leaving, then every few minutes until \"go now\"", from: "from", every: "every",
   announceOn: "Announce on", announceHint: "Off: only the sensor and the andiamo_announcement event",
   announce_speaker: "Speaker", announce_notification: "Notification", announce_off: "Off",
   sectionRoute: "Route", sectionAnnounce: "Announcements",
@@ -895,6 +896,11 @@ class AndiamoPanel extends HTMLElement {
         <div class="label">${label}${hint ? `<div class="muted">${hint}</div>` : ""}</div>
         <div class="control">${control}</div>
       </div>`;
+    // "from [2] min, every [2] min"
+    const minutes = (key, min, max) =>
+      `<input type="number" min="${min}" max="${max}" data-setting="${key}" value="${s[key] ?? ""}"> ${this._t("min")}`;
+    const reminders = (fromKey, min, max, everyKey) =>
+      `${this._t("from")} ${minutes(fromKey, min, max)}, ${this._t("every")} ${minutes(everyKey, 1, 60)}`;
     return `
       <section class="card">
         ${row(this._t("tts"), "", `<select data-setting="tts_entity">${opts(this._entities("tts"), s.tts_entity, this._t("none"))}</select>`)}
@@ -903,7 +909,8 @@ class AndiamoPanel extends HTMLElement {
           <option value="de" ${s.language === "de" ? "selected" : ""}>${this._t("german")}</option>
           <option value="en" ${s.language === "en" ? "selected" : ""}>${this._t("english")}</option>
         </select>`)}
-        ${row(this._t("lead"), this._t("leadHint"), `<input type="number" min="5" max="180" step="5" data-setting="car_lead_minutes" value="${s.car_lead_minutes}"> ${this._t("min")}`)}
+        ${row(this._t("transitReminders"), this._t("remindersHint"), reminders("transit_reminder_minutes", 0, 60, "transit_reminder_every"))}
+        ${row(this._t("carReminders"), this._t("remindersHint"), reminders("car_lead_minutes", 5, 180, "car_reminder_every"))}
         ${row(this._t("carReserve"), this._t("carReserveHint"), `<input type="number" min="0" max="120" data-setting="car_reserve_minutes" value="${s.car_reserve_minutes ?? 0}"> ${this._t("min")}`)}
         ${row(this._t("announceOn"), this._t("announceHint"), `<select data-setting="announce">${ANNOUNCE
           .map((a) => `<option value="${a}" ${a === s.announce ? "selected" : ""}>${this._t(`announce_${a}`)}</option>`).join("")}</select>`)}
@@ -1005,7 +1012,7 @@ const STYLE = `
     padding: 12px 0; border-bottom: 1px solid var(--divider-color); }
   .setting:last-child { border-bottom: none; }
   .setting > * { min-width: 0; max-width: 100%; }
-  .setting .control { display: flex; align-items: center; gap: 6px; }
+  .setting .control { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   /* A long speaker name mustn't push the field past the card's edge on a phone. */
   .setting select { min-width: min(240px, 100%); max-width: 100%; text-overflow: ellipsis; }
   input.time { width: 90px; }

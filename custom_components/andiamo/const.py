@@ -33,7 +33,11 @@ MODE_CAR: Final = "car"
 
 DEFAULT_LANGUAGE: Final = "de"
 LANGUAGES: Final = ("de", "en")
+# Reminders before "go now": from how many minutes before leaving, and how often.
+DEFAULT_TRANSIT_REMINDER_MINUTES: Final = 2
+DEFAULT_TRANSIT_REMINDER_EVERY: Final = 2
 DEFAULT_CAR_LEAD_MINUTES: Final = 30
+DEFAULT_CAR_REMINDER_EVERY: Final = 5
 # Minutes added to a car route's drive time, e.g. for parking.
 DEFAULT_CAR_RESERVE_MINUTES: Final = 0
 
@@ -49,10 +53,6 @@ ANNOUNCE_MODES: Final = (ANNOUNCE_SPEAKER, ANNOUNCE_NOTIFICATION, ANNOUNCE_OFF)
 WATCH_INTERVAL: Final = timedelta(minutes=5)
 DEFAULT_PROBLEM_MINUTES: Final = 15
 
-# Public transport: fixed reminder before "go now".
-TRANSIT_REMINDER: Final = timedelta(minutes=2)
-# Car: countdown step between announcements.
-CAR_STEP_MINUTES: Final = 5
 # A changed leave time is only announced from this difference on.
 CAR_CHANGE_THRESHOLD: Final = timedelta(minutes=2)
 TRANSIT_CHANGE_THRESHOLD: Final = timedelta(minutes=1)

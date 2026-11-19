@@ -18,13 +18,12 @@ from .const import (
     CAR_CHANGE_THRESHOLD,
     CAR_RECHECK_FAR,
     CAR_RECHECK_NEAR,
-    CAR_STEP_MINUTES,
+    DEFAULT_CAR_LEAD_MINUTES,
     MODE_CAR,
     MODE_TRANSIT,
     SIGNAL_RUNS_CHANGED,
     TRANSIT_CHANGE_THRESHOLD,
     TRANSIT_RECHECK,
-    TRANSIT_REMINDER,
 )
 from .providers import CarProvider, Departure, ProviderError, TransitProvider, Trip
 from .store import DataError, AndiamoStore
@@ -439,16 +438,16 @@ class TransitRun(Run):
     def _schedule(self, now: datetime) -> None:
         assert self.leave_at is not None
         self._clear_timers()
-        reminder = self.leave_at - TRANSIT_REMINDER
-        if reminder > now + timedelta(seconds=30):
-            self.at(
-                reminder,
-                lambda: self.say(
-                    self.message("minutes_left", int(TRANSIT_REMINDER.total_seconds() // 60))
-                ),
-            )
+        # Only steps still ahead: the leave time just said already covers the rest.
+        for left in self.manager.store.reminders(MODE_TRANSIT):
+            when = self.leave_at - timedelta(minutes=left)
+            if when > now + timedelta(seconds=30):
+                self.at(when, self._say_left(left))
         self.at(self.leave_at, self.async_go)
         self.schedule_recheck(TRANSIT_RECHECK)
+
+    def _say_left(self, left: int) -> Callable[[], Any]:
+        return lambda: self.say(self.message("minutes_left", left))
 
     def recheck_interval(self) -> timedelta:
         return TRANSIT_RECHECK
@@ -548,7 +547,7 @@ class CarRun(Run):
 
     @property
     def lead(self) -> timedelta:
-        return timedelta(minutes=self.manager.store.settings.get("car_lead_minutes", 30))
+        return timedelta(minutes=self.manager.store.settings.get("car_lead_minutes", DEFAULT_CAR_LEAD_MINUTES))
 
     async def _departure(self) -> datetime:
         """When to leave: arriving the reserve minutes early, with traffic at that time."""
@@ -591,8 +590,7 @@ class CarRun(Run):
     def _schedule(self, now: datetime) -> None:
         assert self.leave_at is not None
         self._clear_timers()
-        lead_minutes = int(self.lead.total_seconds() // 60)
-        for left in range(lead_minutes, 0, -CAR_STEP_MINUTES):
+        for left in self.manager.store.reminders(MODE_CAR):
             when = self.leave_at - timedelta(minutes=left)
             # A step that is due right now still counts (timers can be redone).
             if left not in self._said and when > now - timedelta(seconds=59):

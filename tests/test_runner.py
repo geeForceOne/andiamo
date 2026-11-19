@@ -101,6 +101,52 @@ async def test_transit_leave_reminder_go(
     assert runs.runs == {}
 
 
+async def test_transit_reminders_from_setting(
+    hass: HomeAssistant, runs: RunManager, routes, transit, said, clock, store: AndiamoStore
+) -> None:
+    # Leave at 10:17; remind from 12 minutes, every 4: 12, 8 and 4.
+    store.settings.update(transit_reminder_minutes=12, transit_reminder_every=4)
+    transit.result = [connection(22)]
+
+    await runs.async_press(routes["transit"]["id"])
+    await go_to(hass, clock, at(17))
+    assert said() == [
+        "Du musst um 10:17 los, das ist in 17 Minuten.",
+        "Du hast noch 12 Minuten.",
+        "Du hast noch 8 Minuten.",
+        "Du hast noch 4 Minuten.",
+        "Los jetzt!",
+    ]
+
+
+async def test_transit_reminders_skip_passed_steps(
+    hass: HomeAssistant, runs: RunManager, routes, transit, said, clock, store: AndiamoStore
+) -> None:
+    # Leave in 9 minutes: the 12 is gone, 9 is what the start already says.
+    store.settings.update(transit_reminder_minutes=12, transit_reminder_every=3)
+    transit.result = [connection(14)]
+
+    await runs.async_press(routes["transit"]["id"])
+    await go_to(hass, clock, at(9))
+    assert said() == [
+        "Du musst um 10:09 los, das ist in 9 Minuten.",
+        "Du hast noch 6 Minuten.",
+        "Du hast noch 3 Minuten.",
+        "Los jetzt!",
+    ]
+
+
+async def test_transit_reminders_off(
+    hass: HomeAssistant, runs: RunManager, routes, transit, said, clock, store: AndiamoStore
+) -> None:
+    store.settings["transit_reminder_minutes"] = 0
+    transit.result = [connection(12)]
+
+    await runs.async_press(routes["transit"]["id"])
+    await go_to(hass, clock, at(7))
+    assert said() == ["Du musst um 10:07 los, das ist in 7 Minuten.", "Los jetzt!"]
+
+
 async def test_transit_follows_delay(
     hass: HomeAssistant, runs: RunManager, routes, transit, said, clock
 ) -> None:
@@ -263,6 +309,17 @@ async def test_car_countdown(
     ]
     assert runs.runs == {}
     assert store.car_runs == {}
+
+
+async def test_car_reminders_from_setting(
+    hass: HomeAssistant, runs: RunManager, store, routes, car, said, clock
+) -> None:
+    store.settings.update(car_lead_minutes=20, car_reminder_every=10)
+    car.departure = at(80)
+    await runs.async_start_car(routes["car"]["id"], at(120))
+
+    await go_to(hass, clock, at(80))
+    assert said() == ["Du hast noch 20 Minuten.", "Du hast noch 10 Minuten.", "Los jetzt!"]
 
 
 async def test_car_reserve(
