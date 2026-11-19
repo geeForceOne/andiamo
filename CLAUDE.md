@@ -21,7 +21,7 @@ Simplicity is key: prefer inline, fast flows over dialogs and extra steps.
 - Check current official docs (OJP, TomTom Routing, Home Assistant developer docs) before coding against an API.
 - The UI is English only (panel, card, setup form). Speaker announcements are German (default) or English.
 - German texts use Swiss spelling ("ss", never "ß") and the informal "du". English texts use American spelling.
-- Changes go in `CHANGELOG.md`. Releases are tagged `vX.Y.Z` (HACS installs from these) and built by GitHub Actions.
+- Changes go in `CHANGELOG.md`. To release: bump `version` in `manifest.json`, date the changelog section, push a `vX.Y.Z` tag (HACS installs from these), then `gh release create` with that section as the notes. GitHub Actions only validates (HACS and hassfest).
 - Every change gets its own branch off an up-to-date main. After a merge: pull main, delete the branch (`-d`), `git fetch --prune`.
 - Commit as `geeForceOne <1780268+geeForceOne@users.noreply.github.com>`, with messages that explain why.
 - Nothing secret is committed (API keys, `.env`, local settings, the test HA's config and storage). Check staged files before every commit.
