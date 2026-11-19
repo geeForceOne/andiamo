@@ -6,6 +6,10 @@
 
 - Settings "Transit reminders" and "Car reminders": choose how many minutes before leaving the reminders start and how often they repeat until "go now". The defaults keep the old behavior (transit: once, 2 min before; car: from 30 min, every 5). Set transit to 0 for no reminder.
 
+### Fixed
+
+- HACS no longer warns that the integration has no categories: it now lists under public transport and cars.
+
 ## 1.2.0 - 2026-11-18
 
 ### New

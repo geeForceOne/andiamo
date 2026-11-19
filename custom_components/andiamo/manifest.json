@@ -4,6 +4,10 @@
   "after_dependencies": [
     "tts"
   ],
+  "categories": [
+    "vehicles_transport.public_transport",
+    "vehicles_transport.cars_evs"
+  ],
   "codeowners": [
     "@geeForceOne"
   ],
