@@ -60,6 +60,7 @@ class FakeCar(CarProvider):
         self.arrivals: list[datetime] = []
         # Leaving now: (travel seconds, traffic delay seconds).
         self.now = (1800, 0)
+        self.roads: tuple[str | None, str | None] = (None, None)
         self.now_calls = 0
 
     async def trip_for_arrival(self, origin, destination, arrive_at):
@@ -70,7 +71,7 @@ class FakeCar(CarProvider):
 
     async def trip_now(self, origin, destination):
         self.now_calls += 1
-        return Trip(datetime.now(), self.now[0], self.now[1], 32411)
+        return Trip(datetime.now(), self.now[0], self.now[1], 32411, *self.roads)
 
     async def search_places(self, query: str) -> list[Place]:
         return [Place(query, 47.0, 8.0)]

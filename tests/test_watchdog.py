@@ -123,6 +123,11 @@ async def test_traffic_jam_from_the_limit(watchdog: Watchdog, routes, car) -> No
         "travel_minutes": 50,
     }
 
+    # Where the jam is, when TomTom says.
+    car.roads = ("A2", "A1")
+    await watchdog.async_check()
+    assert watchdog.problems[routes["car"]["id"]]["road"] == "A1"
+
 
 async def test_cancelled_departure(watchdog: Watchdog, routes, transit) -> None:
     transit.result = [departure(10, cancelled=True), departure(20)]

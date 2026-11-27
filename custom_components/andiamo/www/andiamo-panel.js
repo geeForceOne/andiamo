@@ -55,7 +55,7 @@ const setPath = (obj, path, value) => {
   const last = keys.pop();
   keys.reduce((o, k) => o[k], obj)[last] = value;
 };
-const PLACEHOLDERS = ["time", "minutes", "route", "line", "destination", "departure", "traffic", "km"];
+const PLACEHOLDERS = ["time", "minutes", "route", "line", "destination", "departure", "traffic", "km", "via", "jam"];
 const ANNOUNCE = ["speaker", "notification", "off"];
 
 // OJP PtMode → what search results show next to a stop's name.
@@ -161,6 +161,13 @@ const arrival = (iso) => {
   const ymd = ymdOf(new Date(iso));
   return ymd === today() ? clock(iso) : `${showDate(ymd)} ${clock(iso)}`;
 };
+// "Traffic jam +12 min on A3" when TomTom says where the jam is.
+const onRoad = (text, road) => (road ? `${text} on ${road}` : text);
+// The small line under a drive time: "via A4 · jam on A3" (the jam's road only if it isn't the main one).
+const roadsText = (trip) => (!trip ? "" : [trip.via ? `via ${trip.via}` : "",
+  trip.traffic_minutes > 0 && trip.jam_road && trip.jam_road !== trip.via ? `jam on ${trip.jam_road}` : ""]
+  .filter(Boolean).join(" · "));
+const roadsLine = (trip) => { const text = roadsText(trip); return text ? `<div class="roads">${esc(text)}</div>` : ""; };
 // "41 min drive · +3 min traffic · 32 km" from the last car trip planned.
 const driveText = (trip, t, reserve = 0) => {
   if (!trip) return "";
@@ -675,7 +682,7 @@ class AndiamoPanel extends HTMLElement {
         ${this._handle("routes", this._data.routes.length)}
         <div class="grow clickable" data-action="open" data-arg="route:${r.id}" title="${this._t("edit")}">
           <div class="title">${icon} ${esc(r.name)}</div>
-          ${where ? `<div class="muted">${where}</div>` : ""}
+          ${where ? `<div class="muted">${where}</div>` : ""}${r.mode === "car" ? roadsLine(this._data.trips?.[r.id]) : ""}
           ${compact && runText ? `<div>${runText}</div>` : ""}
           ${watch}
         </div>
@@ -756,7 +763,7 @@ class AndiamoPanel extends HTMLElement {
   }
 
   _problemText(p) {
-    return this._t(`problem_${p.reason}`, p.delay_minutes, p.line || "", p.departure ? clock(p.departure) : "");
+    return onRoad(this._t(`problem_${p.reason}`, p.delay_minutes, p.line || "", p.departure ? clock(p.departure) : ""), p.road);
   }
 
   _routeStation(r) {
@@ -966,6 +973,7 @@ const STYLE = `
   .dragging .handle { cursor: grabbing; }
   .title { font-weight: 500; }
   .muted { color: var(--secondary-text-color); font-size: 0.9em; }
+  .roads { color: var(--secondary-text-color); font-size: 0.75em; line-height: 1.3; }
   .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .run { font-weight: 500; }
   .late { color: var(--error-color); }

@@ -387,6 +387,24 @@ async def test_check_car_now(hass: HomeAssistant, ws, car) -> None:
     await hass.async_block_till_done()
     assert hass.states.get(drive).state == "10"
 
+    # With the roads TomTom names: the main one, and where the jam is.
+    car.now, car.roads = (2460, 720), ("A2", "A1")
+    result = await ws("check", route_id=route["id"])
+    assert result["result"]["message"] == (
+        "Driving to GF takes 41 minutes via A2 right now, including 12 minutes of traffic on A1."
+    )
+    assert (await ws.state())["trips"][route["id"]] == {
+        "travel_minutes": 41, "traffic_minutes": 12, "length_km": 32.4, "via": "A2", "jam_road": "A1"
+    }
+    # A jam on the main road is said once.
+    car.roads = ("A2", "A2")
+    result = await ws("check", route_id=route["id"])
+    assert result["result"]["message"] == (
+        "Driving to GF takes 41 minutes via A2 right now, including 12 minutes of traffic."
+    )
+    await hass.async_block_till_done()
+    assert (hass.states.get(drive).attributes["via"], hass.states.get(drive).attributes["jam_road"]) == ("A2", "A2")
+
 
 async def test_check_is_for_cars(hass: HomeAssistant, ws, transit) -> None:
     home = (await ws.state())["locations"][0]["id"]

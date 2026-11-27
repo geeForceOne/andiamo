@@ -19,8 +19,10 @@ TEXTS: dict[str, dict[str, str]] = {
         "go_now": "Los jetzt!",
         "cancelled": "Abgebrochen.",
         "no_connection": "Ich finde keine Verbindung für {route}.",
-        "drive_time": "Bis {destination} brauchst du jetzt {minutes}, davon {traffic} Stau.",
-        "drive_time_free": "Bis {destination} brauchst du jetzt {minutes}, kein Stau.",
+        "drive_time": "Bis {destination} brauchst du jetzt {minutes}{via}, davon {traffic} Stau{jam}.",
+        "drive_time_free": "Bis {destination} brauchst du jetzt {minutes}{via}, kein Stau.",
+        "via": " über die {road}",
+        "jam_on": " auf der {road}",
         "minute": "1 Minute",
         "minutes": "{n} Minuten",
     },
@@ -32,8 +34,10 @@ TEXTS: dict[str, dict[str, str]] = {
         "go_now": "Go now!",
         "cancelled": "Cancelled.",
         "no_connection": "I can't find a connection for {route}.",
-        "drive_time": "Driving to {destination} takes {minutes} right now, including {traffic} of traffic.",
-        "drive_time_free": "Driving to {destination} takes {minutes} right now, no traffic.",
+        "drive_time": "Driving to {destination} takes {minutes}{via} right now, including {traffic} of traffic{jam}.",
+        "drive_time_free": "Driving to {destination} takes {minutes}{via} right now, no traffic.",
+        "via": " via {road}",
+        "jam_on": " on {road}",
         "minute": "1 minute",
         "minutes": "{n} minutes",
     },
@@ -45,7 +49,9 @@ MESSAGES = (
     "leave_at", "changed", "traffic_changed", "minutes_left", "go_now", "cancelled", "no_connection",
     "drive_time", "drive_time_free",
 )
-PLACEHOLDERS = ("time", "minutes", "route", "line", "destination", "departure", "traffic", "km")
+PLACEHOLDERS = (
+    "time", "minutes", "route", "line", "destination", "departure", "traffic", "km", "via", "jam",
+)
 
 
 def unknown_placeholders(template: str) -> list[str]:
@@ -74,6 +80,11 @@ def minutes(language: str, count: int) -> str:
     if count == 1:
         return text(language, "minute")
     return text(language, "minutes", n=count)
+
+
+def road_phrase(language: str, key: str, road: str | None) -> str:
+    """Like ' über die A4' or ' auf der A3', to put after a time; empty without a road."""
+    return text(language, key, road=road) if road else ""
 
 
 def clock(value: datetime) -> str:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from custom_components.andiamo.texts import short_minutes, text, unknown_placeholders
+from custom_components.andiamo.texts import road_phrase, short_minutes, text, unknown_placeholders
 
 
 def test_template_replaces_default() -> None:
@@ -32,3 +32,13 @@ def test_short_minutes() -> None:
     assert short_minutes(41) == "41 min"
     assert short_minutes(60) == "1 h"
     assert short_minutes(101) == "1 h 41 min"
+
+
+def test_drive_time_names_roads() -> None:
+    said = text("de", "drive_time", route="Work", destination="Büro", minutes="41 Minuten",
+                traffic="12 Minuten", km="32", via=road_phrase("de", "via", "A2"),
+                jam=road_phrase("de", "jam_on", "A1"))
+    assert said == "Bis Büro brauchst du jetzt 41 Minuten über die A2, davon 12 Minuten Stau auf der A1."
+    said = text("en", "drive_time_free", route="Work", destination="Office", minutes="29 minutes",
+                traffic="0 minutes", km="32", via=road_phrase("en", "via", None), jam="")
+    assert said == "Driving to Office takes 29 minutes right now, no traffic."

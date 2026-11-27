@@ -8,6 +8,21 @@
         "trafficDelayInSeconds": 180,
         "departureTime": "2026-10-19T18:19:00+02:00",
         "arrivalTime": "2026-10-19T19:00:00+02:00"
+      },
+      "sections": [
+        {"startPointIndex": 0, "endPointIndex": 120, "sectionType": "TRAVEL_MODE", "travelMode": "car"},
+        {"startPointIndex": 12, "endPointIndex": 15, "sectionType": "TRAFFIC", "simpleCategory": "ROAD_WORK", "delayInSeconds": 20},
+        {"startPointIndex": 64, "endPointIndex": 70, "sectionType": "TRAFFIC", "simpleCategory": "JAM", "delayInSeconds": 160}
+      ],
+      "guidance": {
+        "instructions": [
+          {"routeOffsetInMeters": 0, "pointIndex": 0, "street": "Musterweg"},
+          {"routeOffsetInMeters": 400, "pointIndex": 10, "street": "Seestrasse", "roadNumbers": ["3"]},
+          {"routeOffsetInMeters": 3100, "pointIndex": 40, "street": "Nordring", "roadNumbers": ["A1", "E60"]},
+          {"routeOffsetInMeters": 9000, "pointIndex": 60, "roadNumbers": ["A2", "E60"]},
+          {"routeOffsetInMeters": 31000, "pointIndex": 110, "street": "Talstrasse"},
+          {"routeOffsetInMeters": 32411, "pointIndex": 120, "street": "Talstrasse"}
+        ]
       }
     }
   ]

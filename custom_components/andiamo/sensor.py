@@ -132,7 +132,7 @@ class DriveTimeSensor(RouteEntity, RestoreSensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
             key: self._check[key]
-            for key in ("traffic_minutes", "length_km", "message", "checked_at")
+            for key in ("traffic_minutes", "length_km", "via", "jam_road", "message", "checked_at")
             if key in self._check
         }
 

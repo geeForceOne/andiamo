@@ -76,6 +76,32 @@ def test_tomtom_trip() -> None:
     )
 
 
+def test_tomtom_trip_names_main_road_and_jam() -> None:
+    trip = parse_trip(json.loads(fixture("tomtom_route.json")))
+    # 22 km on the A2 beat 5.9 km on the A1 and 2.7 km on Seestrasse (number 3 is no name).
+    assert trip.via == "A2"
+    # The 20 s roadworks are too short; the jam starts after the A2 instruction.
+    assert trip.jam_road == "A2"
+
+
+def test_tomtom_road_falls_back_to_street() -> None:
+    route = json.loads(fixture("tomtom_route.json"))["routes"][0]
+    for instruction in route["guidance"]["instructions"]:
+        instruction.pop("roadNumbers", None)
+    route["guidance"]["instructions"][3]["street"] = "Uferstrasse"
+    route["sections"][2]["startPointIndex"] = 11
+    trip = parse_trip({"routes": [route]})
+    assert trip.via == "Uferstrasse"
+    assert trip.jam_road == "Seestrasse"
+
+
+def test_tomtom_trip_without_details() -> None:
+    route = json.loads(fixture("tomtom_route.json"))["routes"][0]
+    del route["guidance"], route["sections"]
+    trip = parse_trip({"routes": [route]})
+    assert (trip.via, trip.jam_road) == (None, None)
+
+
 def test_tomtom_no_route() -> None:
     with pytest.raises(ProviderError):
         parse_trip({"routes": []})

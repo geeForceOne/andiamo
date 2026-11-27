@@ -118,6 +118,13 @@ const arrival = (iso) => {
   return ymd === today() ? clock(iso) : `${showDate(ymd)} ${clock(iso)}`;
 };
 
+// "Traffic jam +12 min on A3" when TomTom says where the jam is.
+const onRoad = (text, road) => (road ? `${text} on ${road}` : text);
+// The small line under a drive time: "via A4 · jam on A3" (the jam's road only if it isn't the main one).
+const roadsText = (trip) => (!trip ? "" : [trip.via ? `via ${trip.via}` : "",
+  trip.traffic_minutes > 0 && trip.jam_road && trip.jam_road !== trip.via ? `jam on ${trip.jam_road}` : ""]
+  .filter(Boolean).join(" · "));
+const roadsLine = (trip) => { const text = roadsText(trip); return text ? `<div class="roads">${esc(text)}</div>` : ""; };
 // "41 min drive · +3 min traffic · 32 km" from the last car trip planned or checked.
 const driveText = (trip, t, reserve = 0) => {
   if (!trip) return "";
@@ -340,16 +347,16 @@ class AndiamoCard extends HTMLElement {
     if (r.mode === "car") {
       const drive = driveText(this._data.trips?.[r.id], (k, v) => this._t(k, v), reserveOf(r, this._data.settings));
       const trip = this._data.trips?.[r.id];
-      if (drive && !run) info = `<div class="muted">${esc(drive)} · ${esc(etaText(trip, (k, v) => this._t(k, v)))}</div>`;
+      if (drive && !run) info = `<div class="muted">${esc(drive)} · ${esc(etaText(trip, (k, v) => this._t(k, v)))}</div>${roadsLine(trip)}`;
     }
     const p = this._data.problems?.[r.id];
-    const problem = p ? `<div class="late">⚠ ${esc(this._t(`problem_${p.reason}`, p.delay_minutes, p.line || "", p.departure ? clock(p.departure) : ""))}</div>` : "";
+    const problem = p ? `<div class="late">⚠ ${esc(onRoad(this._t(`problem_${p.reason}`, p.delay_minutes, p.line || "", p.departure ? clock(p.departure) : ""), p.road))}</div>` : "";
     return `<div class="row">
       <div class="grow"><div class="name">${r.mode === "car" ? "🚗" : routeIcon(r.lines)} ${esc(r.name)}</div>${problem}${info}</div>
       <div class="actions">${right}</div></div>`;
   }
 
-  // A car route's drive time leaving now: "25 min · 32 km · 4 min traffic jam · ETA 12:00".
+  // A car route's drive time leaving now: "25 min · 32 km · 4 min traffic jam · ETA 12:00", roads below.
   _driveBoard(b) {
     const t = (k, v) => this._t(k, v);
     let text;
@@ -363,7 +370,7 @@ class AndiamoCard extends HTMLElement {
     }
     return `<div class="board">
       <div class="name">🚗 ${esc(b.name)}</div>
-      <div class="drive">${text}</div></div>`;
+      <div class="drive">${text}</div>${b.travel_minutes === undefined ? "" : roadsLine(b)}</div>`;
   }
 
   // One route's next departures; the ones whose leave time has passed drop out between refreshes.
@@ -510,6 +517,7 @@ const STYLE = `
   .late { color: var(--error-color); }
   .early { color: var(--secondary-text-color); }
   .muted { color: var(--secondary-text-color); font-size: 0.9em; }
+  .roads { color: var(--secondary-text-color); font-size: 0.75em; line-height: 1.3; }
   .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; margin-left: auto; }
   button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--divider-color); background: none;
     color: var(--primary-text-color); cursor: pointer; }

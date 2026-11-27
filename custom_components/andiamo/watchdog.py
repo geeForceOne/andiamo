@@ -130,11 +130,14 @@ class Watchdog:
         delay = round(trip.traffic_delay_seconds / 60)
         if delay < limit:
             return None
-        return {
+        problem = {
             "reason": "traffic",
             "delay_minutes": delay,
             "travel_minutes": round(trip.travel_seconds / 60),
         }
+        if trip.jam_road:
+            problem["road"] = trip.jam_road
+        return problem
 
     async def _check_transit(self, route: dict[str, Any], limit: int) -> dict[str, Any] | None:
         """The next catchable departure of each ticked line; the first one cancelled or too late."""

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- Car routes name the main road and where a jam is: a small "via A4 · jam on A3" line under the drive time in the panel and card, "über die A4 … Stau auf der A3" in the announcement, and on the traffic problem warning. The drive time sensor has new `via` and `jam_road` attributes, and message templates take `{via}` and `{jam}`. This uses no extra TomTom calls.
+
 ## 1.3.0 - 2026-11-19
 
 ### New

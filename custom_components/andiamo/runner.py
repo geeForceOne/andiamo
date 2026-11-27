@@ -27,7 +27,7 @@ from .const import (
 )
 from .providers import CarProvider, Departure, ProviderError, TransitProvider, Trip
 from .store import DataError, AndiamoStore
-from .texts import clock, minutes, minutes_until, text
+from .texts import clock, minutes, minutes_until, road_phrase, text
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,12 +44,17 @@ def arrival(time_of_day: time, day: date | None = None) -> datetime:
 
 
 def drive_of(trip: Trip) -> dict[str, Any]:
-    """A trip as the route list and the drive time sensor show it."""
-    return {
+    """A trip as the route list and the drive time sensor show it; roads only when known."""
+    drive = {
         "travel_minutes": round(trip.travel_seconds / 60),
         "traffic_minutes": round(trip.traffic_delay_seconds / 60),
         "length_km": round(trip.length_meters / 1000, 1),
     }
+    if trip.via:
+        drive["via"] = trip.via
+    if trip.jam_road:
+        drive["jam_road"] = trip.jam_road
+    return drive
 
 
 class RunManager:
@@ -194,6 +199,9 @@ class RunManager:
             minutes=minutes(language, drive["travel_minutes"]),
             traffic=minutes(language, drive["traffic_minutes"]),
             km=f"{drive['length_km']:g}",
+            via=road_phrase(language, "via", trip.via),
+            # A jam on the main road needs no second mention.
+            jam=road_phrase(language, "jam_on", trip.jam_road if trip.jam_road != trip.via else None),
         )
         result = {**drive, "message": message, "checked_at": dt_util.utcnow().isoformat()}
         self.checks[route_id] = result

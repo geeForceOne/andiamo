@@ -64,6 +64,10 @@ class Trip:
     travel_seconds: int
     traffic_delay_seconds: int
     length_meters: int
+    via: str | None = None
+    """The road taken the longest way ("A4", else a street name), so a jam warning makes sense."""
+    jam_road: str | None = None
+    """The road of the biggest traffic delay on the way."""
 
 
 @dataclass(frozen=True)
