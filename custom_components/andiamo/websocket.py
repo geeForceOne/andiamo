@@ -344,6 +344,10 @@ async def ws_next(hass, runtime, msg):
         vol.Optional("refresh", default=60): vol.All(
             vol.Coerce(int), vol.Range(min=30, max=300)
         ),
+        # Drive times change slowly, and every TomTom call counts against the daily quota.
+        vol.Optional("car_refresh", default=300): vol.All(
+            vol.Coerce(int), vol.Range(min=60, max=900)
+        ),
         vol.Optional("late", default=False): bool,
     }
 )
@@ -351,18 +355,21 @@ async def ws_next(hass, runtime, msg):
 def ws_timetable(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Departure boards and car drive times for the card, now and every `refresh` seconds while it's open."""
+    """Departure boards and car drive times for the card, now and while it's open:
+    departures every `refresh` seconds, drive times every `car_refresh` seconds."""
     try:
         runtime = _runtime(hass)
     except HomeAssistantError as err:
         connection.send_error(msg["id"], "not_loaded", str(err))
         return
     refresh = timedelta(seconds=msg["refresh"])
+    car_refresh = timedelta(seconds=msg["car_refresh"])
     task: asyncio.Task[None] | None = None
 
     async def send() -> None:
+        # Each timer only refetches what's due; the rest comes from the cache.
         boards = await runtime.timetable.boards(
-            msg.get("route_ids"), msg["count"], refresh, late=msg["late"]
+            msg.get("route_ids"), msg["count"], refresh, car_refresh, late=msg["late"]
         )
         connection.send_message(websocket_api.event_message(msg["id"], {"boards": boards}))
 
@@ -376,6 +383,8 @@ def ws_timetable(
         async_track_time_interval(hass, update, refresh),
         async_dispatcher_connect(hass, SIGNAL_DATA_CHANGED, update),
     ]
+    if car_refresh != refresh:
+        unsubs.append(async_track_time_interval(hass, update, car_refresh))
 
     @callback
     def unsubscribe() -> None:

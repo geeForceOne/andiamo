@@ -507,6 +507,37 @@ async def test_timetable_with_car_routes_in_card_order(hass: HomeAssistant, ws, 
     assert car.now_calls == 1
 
 
+async def test_timetable_refreshes_drive_times_on_their_own(
+    hass: HomeAssistant, ws, transit, car, freezer
+) -> None:
+    car_route = await _car_route(ws, hass)
+    home = car_route["origin_id"]
+    await ws("station/save", item={"location_id": home, "name": "Tram", "stop_ref": "x", "walk_minutes": 5})
+    line = {"key": "10|Flughafen", "name": "10", "destination": "Flughafen"}
+    transit_route = (await ws("route/save", item={
+        "name": "Work", "mode": "transit", "origin_id": home, "lines": [line],
+    }))["result"]
+    car.now = (1500, 240)
+    car.now_calls = 0
+    transit.calls.clear()
+    assert (await ws("timetable", route_ids=[transit_route["id"], car_route["id"]], refresh=60, car_refresh=180))["success"]
+    await ws.event("boards")
+    assert (len(transit.calls), car.now_calls) == (1, 1)
+
+    async def tick(seconds: int) -> tuple[int, int]:
+        freezer.tick(seconds)
+        async_fire_time_changed(hass)
+        await hass.async_block_till_done()
+        return len(transit.calls), car.now_calls
+
+    # Departures every minute, the drive time only every 3 minutes.
+    assert await tick(60) == (2, 1)
+    assert await tick(60) == (3, 1)
+    assert await tick(60) == (4, 2)
+
+    assert not (await ws("timetable", car_refresh=30))["success"]
+
+
 async def test_reorder(hass: HomeAssistant, ws) -> None:
     home = (await ws.state())["locations"][0]["id"]
     a = (await ws("location/save", item={"name": "A", "latitude": 47.1, "longitude": 8.1}))["result"]

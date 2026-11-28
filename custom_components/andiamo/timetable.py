@@ -93,11 +93,17 @@ class Timetable:
         return await self._shared(f"car:{route['id']}", max_age, fetch)
 
     async def boards(
-        self, route_ids: list[str] | None, count: int, refresh: timedelta, late: bool = False
+        self,
+        route_ids: list[str] | None,
+        count: int,
+        refresh: timedelta,
+        car_refresh: timedelta,
+        late: bool = False,
     ) -> list[dict[str, Any]]:
         """For each transit route: its station and next departures on its ticked lines
-        (with `late`, also the ones too soon to walk to, which come on top of `count`).
-        For each car route: the drive time when leaving now. In the order of `route_ids` if given."""
+        (with `late`, also the ones too soon to walk to, which come on top of `count`),
+        at most `refresh` old. For each car route: the drive time when leaving now, at most
+        `car_refresh` old. In the order of `route_ids` if given."""
         if route_ids:
             routes = [r for route_id in route_ids for r in self.store.routes if r["id"] == route_id]
         else:
@@ -108,7 +114,7 @@ class Timetable:
             boards.append(board)
             if route["mode"] == MODE_CAR:
                 try:
-                    board.update(await self.drive(route, refresh - SLACK))
+                    board.update(await self.drive(route, car_refresh - SLACK))
                 except Exception as err:  # noqa: BLE001 - one route failing mustn't empty the card
                     board["error"] = str(err) or type(err).__name__
                 continue

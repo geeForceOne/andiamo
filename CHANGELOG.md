@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- The timetable card can start public transport routes: each one has a **Start** button next to its name, and while it runs it shows when to leave, with **Next** and **Stop**. One card now shows the departures and starts the countdown. Turn off **Show Start buttons** (`show_start: false`) for a card that only shows departures.
+- The timetable card refreshes drive times on their own schedule: **Refresh drive times every** (1 to 15 minutes, default 5), next to the departures' refresh. Fewer TomTom requests for the same card; set it to 1 minute for the old behavior. In YAML: `car_refresh` (seconds).
+
 ## 1.4.0 - 2026-11-27
 
 ### New
